@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#fff"/><g transform="translate(20.5 20.5) scale(0.92)">
+  <circle cx="296" cy="196" r="132" fill="#fff" stroke="#183158" stroke-width="18"/>
+  <g stroke="#183158" stroke-width="10" stroke-linecap="round"><line x1="296.0" y1="96.0" x2="296.0" y2="80.0"/><line x1="346.0" y1="109.4" x2="354.0" y2="95.5"/><line x1="382.6" y1="146.0" x2="396.5" y2="138.0"/><line x1="396.0" y1="196.0" x2="412.0" y2="196.0"/><line x1="382.6" y1="246.0" x2="396.5" y2="254.0"/><line x1="346.0" y1="282.6" x2="354.0" y2="296.5"/><line x1="296.0" y1="296.0" x2="296.0" y2="312.0"/><line x1="246.0" y1="282.6" x2="238.0" y2="296.5"/><line x1="209.4" y1="246.0" x2="195.5" y2="254.0"/><line x1="196.0" y1="196.0" x2="180.0" y2="196.0"/><line x1="209.4" y1="146.0" x2="195.5" y2="138.0"/><line x1="246.0" y1="109.4" x2="238.0" y2="95.5"/></g>
+  <g stroke="#183158" stroke-width="16" stroke-linecap="round"><line x1="296" y1="196" x2="296" y2="112"/><line x1="296" y1="196" x2="368" y2="196"/></g>
+  <circle cx="296" cy="196" r="13" fill="#183158"/>
+  <g fill="#183158" stroke="#fff" stroke-width="14" paint-order="stroke">
+    <path d="M40 486 C40 392 98 350 176 350 C254 350 312 392 312 486 Z"/>
+    <circle cx="176" cy="262" r="72"/>
+  </g>
+  <polyline points="300,452 372,382 402,410 459,343" fill="none" stroke="#AF1116" stroke-width="30" stroke-linejoin="miter" stroke-linecap="butt"/>
+  <polygon points="492,303 488,368 430,318" fill="#AF1116"/></g></svg>
