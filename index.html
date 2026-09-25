@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Planificación de tareas</title>
+  <meta name="description" content="Planificación semanal de tareas: carga del Excel, seguimiento, riesgos y evolución.">
+  <meta name="application-name" content="Planificación">
+  <meta name="apple-mobile-web-app-title" content="Planificación">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#4B5557">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" defer></script>
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <div id="app" hidden>
+    <header class="barra">
+      <a class="marca" href="#/resumen">
+        <img src="/icons/icon.svg" alt="" width="34" height="34">
+        <span>Planificación de tareas</span>
+      </a>
+      <div class="semana-ctrl" role="group" aria-label="Semana">
+        <button id="sem-prev" class="sem-flecha" type="button" aria-label="Semana anterior">‹</button>
+        <label class="sem-sel"><span class="sr">Semana</span><select id="semana"></select></label>
+        <button id="sem-next" class="sem-flecha" type="button" aria-label="Semana siguiente">›</button>
+      </div>
+      <div class="usuario">
+        <span id="usuario"></span>
+        <button id="salir" class="btn-barra" type="button">Salir</button>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Módulos">
+      <a data-mod="resumen" href="#/resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Resumen</span></a>
+      <a data-mod="planificacion" href="#/planificacion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>Planificación</span></a>
+      <a data-mod="personas" href="#/personas"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M1 21c0-4 3.5-7 8-7s8 3 8 7M17 3.5a4 4 0 0 1 0 8M23 21c0-3-2-5.5-5-6.5"/></svg><span>Personas</span></a>
+      <a data-mod="riesgos" href="#/riesgos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01"/></svg><span class="l-largo">Riesgos y auditoría</span><span class="l-corto">Riesgos</span></a>
+      <a data-mod="evolucion" href="#/evolucion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>Evolución</span></a>
+      <a data-mod="carga" href="#/carga"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M4 15v5h16v-5"/></svg><span>Carga</span></a>
+    </nav>
+
+    <main id="contenido" tabindex="-1" aria-live="polite"></main>
+  </div>
+  <noscript>Esta aplicación necesita JavaScript.</noscript>
+</body>
+</html>

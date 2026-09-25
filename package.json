@@ -1,0 +1,7 @@
+{
+  "name": "planificacion",
+  "private": true,
+  "type": "module",
+  "description": "Planificación de tareas: Excel semanal → Supabase, con análisis por persona, riesgos y evolución.",
+  "scripts": { "dev": "vercel dev" }
+}
