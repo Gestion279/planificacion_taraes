@@ -12,10 +12,9 @@ Aplicación única para la planificación semanal: se sube el Excel de cada áre
 
 ### 1. Supabase (ya está hecho)
 
-El proyecto `planificacion_tareas` ya tiene aplicadas las 5 migraciones de `supabase/migrations/`. Falta solo:
+El proyecto `planificacion_tareas` ya tiene aplicadas las 6 migraciones de `supabase/migrations/`. No hay que crear usuarios.
 
-1. **Authentication → Sign In / Providers:** desactivar **Allow new users to sign up**.
-2. **Authentication → Users → Add user:** crear cada usuario con email y contraseña (marcar *Auto Confirm User*).
+**Acceso:** la aplicación es pública para quien tenga el enlace de Vercel. Cualquiera con el enlace puede ver, subir el Excel y cargar horas reales o evaluar riesgos. Lo que **no** se puede hacer es borrar datos ni modificar a mano lo que viene del Excel: esos datos solo cambian subiendo un Excel nuevo, y cada carga queda en el historial con el nombre indicado en *Cargado por*. Conviene compartir el enlace solo con el equipo.
 
 ### 2. GitHub
 
@@ -40,10 +39,11 @@ La clave de `SUPABASE_ANON_KEY` es la **pública** (publishable) y está pensada
 
 ### 4. Primer uso
 
-1. Entrar con uno de los usuarios creados.
-2. Ir a **Carga → Migrar el historial de los dashboards anteriores** y elegir los dos HTML actuales (`Planificación_Semanal.html` e `Historico_Planificación.html`).
-3. Tocar **Ver qué va a cambiar** y después **Confirmar migración**. Se cargan 13 semanas (5.008 actividades).
-4. A partir de ahí, cada semana: **Carga → subir el Excel de cada área → Ver qué va a cambiar → Confirmar carga**.
+1. Abrir el enlace de Vercel.
+2. En **Carga**, completar *Cargado por* con tu nombre.
+3. Ir a **Carga → Migrar el historial de los dashboards anteriores** y elegir los dos HTML actuales (`Planificación_Semanal.html` e `Historico_Planificación.html`).
+4. Tocar **Ver qué va a cambiar** y después **Confirmar migración**. Se cargan 13 semanas (5.008 actividades).
+5. A partir de ahí, cada semana: **Carga → subir el Excel de cada área → Ver qué va a cambiar → Confirmar carga**.
 
 ### Instalar la aplicación
 
@@ -63,7 +63,7 @@ api/config.js            Entrega URL y clave pública desde las variables de Ver
 css/app.css              Estilos (paleta: Moody Beige, Pewter Moon, Dried Grass, Summer Sun, Council Bluffs)
 icons/                   Ícono en todos los tamaños
 js/
-  app.js                 Sesión, selector de semana, navegación y caché de datos
+  app.js                 Selector de semana, navegación y caché de datos
   db.js                  Única capa que habla con Supabase
   engine.js              Motor de análisis: ÚNICO lugar donde se calculan indicadores
   excel.js               Lectura del Excel (persona en B1, columnas A–H)
@@ -71,7 +71,7 @@ js/
   detalle.js             Detalle de actividad, historial y horas reales
   ui.js                  Tablas, gráficos, formato
   modules/               Resumen, Planificación, Personas, Riesgos y auditoría, Evolución, Carga
-supabase/migrations/     Modelo de datos, seguridad, sincronización y vistas
+supabase/migrations/     Modelo de datos, permisos, sincronización, vistas y acceso público
 docs/SINCRONIZACION.md   Cómo se identifica cada tarea y cómo se evita duplicar
 ```
 
@@ -100,3 +100,7 @@ vercel dev
 ## Actualizaciones
 
 Cada vez que se sube un cambio a GitHub, Vercel publica la versión nueva automáticamente. Si se modifican archivos de la aplicación, conviene cambiar `CACHE = 'planificacion-v1'` en `sw.js` (por ejemplo a `v2`), así las aplicaciones instaladas descargan todo de nuevo.
+
+## Si más adelante se quiere restringir el acceso
+
+La base ya tiene preparadas las columnas de usuario (`usuario_id`, `usuario_email`) y las políticas para usuarios autenticados. Para volver a exigir inicio de sesión alcanza con quitar los permisos de `anon` de la migración 006 y reponer la pantalla de ingreso.
