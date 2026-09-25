@@ -2,7 +2,7 @@
 // Planificación de tareas — núcleo de la aplicación
 // =====================================================================
 import * as db from './db.js';
-import { esc, h, rangoSemana, limpiarGraficos, aviso } from './ui.js';
+import { esc, rangoSemana, limpiarGraficos, aviso } from './ui.js';
 import { addDays } from './engine.js';
 import * as resumen from './modules/resumen.js';
 import * as planificacion from './modules/planificacion.js';
@@ -15,7 +15,6 @@ const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, carga };
 
 // ---------- estado compartido (una sola fuente de datos para todos los módulos) ----------
 export const app = {
-  usuario: null,
   semanas: [],          // [{id, inicio, fin, actividades}] desc
   semana: null,         // semana seleccionada
   filas: [],            // actividades de la semana seleccionada
@@ -66,7 +65,6 @@ export const app = {
     const { rows, cambios } = await this.filasDe([this.semana]);
     this.filas = rows; this.cambiosSemana = cambios;
     this.filasPrevia = prev ? (await this.filasDe([prev])).rows : [];
-    try { localStorage.setItem('planif.semana', this.semana.id); } catch { /* preferencia de interfaz opcional */ }
   },
 
   // Se llama después de una carga: recarga la lista de semanas y vacía la caché
@@ -138,50 +136,13 @@ async function render() {
   main.focus({ preventScroll: true });
 }
 
-function pantallaLogin(error = '') {
-  document.body.classList.add('sin-sesion');
-  $('#app').hidden = true;
-  let el = $('#login');
-  if (!el) {
-    el = h(`<main id="login" class="login">
-      <form class="login-caja">
-        <img src="/icons/icon.svg" alt="" width="64" height="64">
-        <h1>Planificación de tareas</h1>
-        <label>Email<input name="email" type="email" autocomplete="username" required></label>
-        <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
-        <p class="login-error" role="alert"></p>
-        <button class="btn primario" type="submit">Ingresar</button>
-      </form></main>`);
-    document.body.appendChild(el);
-    el.querySelector('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      const b = e.target.querySelector('button'); b.disabled = true; b.textContent = 'Ingresando…';
-      try { await db.auth.entrar(f.get('email'), f.get('password')); }
-      catch (err) { el.querySelector('.login-error').textContent = err.message; }
-      finally { b.disabled = false; b.textContent = 'Ingresar'; }
-    });
-  }
-  el.hidden = false;
-  el.querySelector('.login-error').textContent = error;
-}
-
-async function entrarApp(sesion) {
-  if (app.usuario?.id === sesion.user.id) return;
-  app.usuario = sesion.user;
-  document.body.classList.remove('sin-sesion');
-  $('#login')?.setAttribute('hidden', '');
+async function entrarApp() {
   $('#app').hidden = false;
-  $('#usuario').textContent = sesion.user.email;
   $('#contenido').innerHTML = '<div class="cargando">Cargando semanas…</div>';
   app.semanas = await db.semanas();
   app.areas = await db.areas();
-  let guardada = null;
-  try { guardada = localStorage.getItem('planif.semana'); } catch { /* sin preferencias */ }
-  // Al abrir: última semana cargada (no la semana calendario). Se respeta la última elegida en esta sesión del navegador solo si sigue existiendo.
-  const inicial = sessionStorage.getItem('planif.sesionIniciada') && app.semanas.some((s) => s.id === guardada) ? guardada : app.semanas[0]?.id;
-  sessionStorage.setItem('planif.sesionIniciada', '1');
-  await app.seleccionarSemana(inicial);
+  // Al abrir: última semana cargada (no la semana calendario).
+  await app.seleccionarSemana(app.semanas[0]?.id);
   pintarSelector();
   await render();
 }
@@ -193,12 +154,10 @@ async function iniciar() {
   $('#semana').addEventListener('change', (e) => cambiarSemana(e.target.value));
   $('#sem-prev').addEventListener('click', () => { const i = app.semanas.findIndex((s) => s.id === app.semana.id); if (app.semanas[i + 1]) cambiarSemana(app.semanas[i + 1].id); });
   $('#sem-next').addEventListener('click', () => { const i = app.semanas.findIndex((s) => s.id === app.semana.id); if (i > 0) cambiarSemana(app.semanas[i - 1].id); });
-  $('#salir').addEventListener('click', async () => { await db.auth.salir(); location.hash = ''; location.reload(); });
   window.addEventListener('hashchange', render);
 
-  db.auth.alCambiar((s) => { if (s) entrarApp(s).catch((e) => aviso(e.message, 'error')); else if (app.usuario) location.reload(); });
-  const sesion = await db.auth.sesion();
-  if (sesion) await entrarApp(sesion); else pantallaLogin();
+  try { await entrarApp(); }
+  catch (e) { $('#app').hidden = false; $('#contenido').innerHTML = `<div class="error-bloque"><h2>No se pudieron cargar los datos</h2><p>${esc(e.message)}</p></div>`; }
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }

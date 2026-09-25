@@ -131,8 +131,8 @@ export function areaDeArchivo(nombre) {
   return '';
 }
 
-export function armarPayload({ archivo, hash, area, semana, filas, origen = 'app' }) {
-  return { archivo, archivo_hash: hash, area, semana_inicio: semana, origen, filas };
+export function armarPayload({ archivo, hash, area, semana, filas, origen = 'app', cargadoPor = '' }) {
+  return { archivo, archivo_hash: hash, area, semana_inicio: semana, origen, cargado_por: cargadoPor, filas };
 }
 
 async function sha256(buf) {

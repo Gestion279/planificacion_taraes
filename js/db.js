@@ -1,7 +1,7 @@
 // =====================================================================
 // Acceso a datos (Supabase). Única capa que habla con la base.
-// La clave usada es la "publishable/anon": pública por diseño; la
-// seguridad la dan RLS + la función de sincronización.
+// Acceso público por enlace: se usa la clave "publishable/anon".
+// Las políticas de la base limitan qué se puede modificar (nada se borra).
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
@@ -15,20 +15,9 @@ export async function iniciar() {
   } catch { /* sin función serverless (desarrollo local) */ }
   cfg = cfg?.url ? cfg : globalThis.APP_CONFIG;
   if (!cfg?.url || !cfg?.key) throw new Error('Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY en Vercel (ver README).');
-  sb = createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } });
+  sb = createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } });
   return sb;
 }
-
-export const auth = {
-  sesion: async () => (await sb.auth.getSession()).data.session,
-  entrar: async (email, password) => {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : error.message);
-    return data.session;
-  },
-  salir: () => sb.auth.signOut(),
-  alCambiar: (fn) => sb.auth.onAuthStateChange((_e, s) => fn(s)),
-};
 
 const n = (v) => (v === null || v === undefined ? null : Number(v));
 const mapActividad = (r) => ({
@@ -89,7 +78,7 @@ export async function historialActividad(id) {
 
 export async function importaciones(limite = 100) {
   const { data, error } = await sb.from('importaciones')
-    .select('id,created_at,archivo,usuario_email,origen,total,nuevas,modificadas,sin_cambios,retiradas,reactivadas,observaciones,semanas(fecha_inicio),areas(nombre)')
+    .select('id,created_at,archivo,usuario_email,cargado_por,origen,total,nuevas,modificadas,sin_cambios,retiradas,reactivadas,observaciones,semanas(fecha_inicio),areas(nombre)')
     .order('created_at', { ascending: false }).limit(limite);
   if (error) throw new Error(error.message);
   return data.map((i) => ({ ...i, semana: i.semanas?.fecha_inicio, area: i.areas?.nombre }));
