@@ -16,13 +16,19 @@ const OBS = {
   persona_ausente: 'Persona que no vino en el archivo', persona_otra_area: 'Persona de otra área', archivo_repetido: 'Archivo repetido',
 };
 const CAMPOS = { fecha: 'fecha', dia: 'día', tarea: 'tarea', prioridad: 'prioridad', horas_planificadas: 'tiempo', recursos: 'recursos', riesgos: 'riesgos', estado: 'estado' };
+// Nombre de quien carga: preferencia de interfaz guardada en este navegador (no es un dato de negocio)
+const leerNombre = () => { try { return localStorage.getItem('planif.cargadoPor') || ''; } catch { return ''; } };
+const guardarNombre = (v) => { try { localStorage.setItem('planif.cargadoPor', v); } catch { /* opcional */ } };
+const cargadoPor = () => document.querySelector('[data-cargado-por]')?.value.trim() || '';
+
 const IDENT = { exacta: '', cambio_fecha: 'cambió de fecha', texto_editado: 'se editó el texto' };
 
 export async function render(el, app) {
   el.innerHTML = `
   <header class="mod-cab"><h1>Carga</h1><p class="sub">Subí el Excel semanal de cada área, como hasta ahora.</p></header>
   <section class="panel">
-    <header class="panel-cab"><h2>Importar planificación</h2></header>
+    <header class="panel-cab"><h2>Importar planificación</h2>
+      <label class="inline">Cargado por<input data-cargado-por type="text" value="${esc(leerNombre())}" placeholder="Tu nombre (opcional)" autocomplete="name"></label></header>
     <label class="zona" data-zona>
       <input type="file" accept=".xlsx,.xls,.xlsm" multiple hidden data-archivo>
       <b>Arrastrá los archivos acá o hacé clic para elegirlos</b>
@@ -38,6 +44,7 @@ export async function render(el, app) {
     <div data-legado-res></div>
   </details>`;
 
+  el.querySelector('[data-cargado-por]').addEventListener('change', (e) => guardarNombre(e.target.value.trim()));
   const zona = el.querySelector('[data-zona]');
   const input = el.querySelector('[data-archivo]');
   ['dragover', 'dragenter'].forEach((ev) => zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add('sobre'); }));
@@ -88,7 +95,7 @@ function tarjeta(card, info, app) {
   card.querySelector('[data-previa]').addEventListener('click', async (e) => {
     const area = card.querySelector('[data-area]').value.trim();
     if (!area) { card.querySelector('[data-area]').focus(); aviso('Indicá el área del archivo.', 'error'); return; }
-    const payload = armarPayload({ archivo: info.archivo, hash: info.hash, area, semana: inSem.value, filas: info.filas });
+    const payload = armarPayload({ archivo: info.archivo, hash: info.hash, area, semana: inSem.value, filas: info.filas, cargadoPor: cargadoPor() });
     const b = e.target; b.disabled = true; b.textContent = 'Comparando con lo cargado…';
     try {
       const res = await db.sincronizar(payload, false);
@@ -153,7 +160,7 @@ async function historial(cont) {
         { key: 'created_at', label: 'Fecha y hora', render: (i) => fechaHora(i.created_at) },
         { key: 'semana', label: 'Semana', render: (i) => (i.semana ? `del ${etiquetaSemana(i.semana)}` : '—') },
         { key: 'area', label: 'Área' },
-        { key: 'archivo', label: 'Archivo', clase: 'col-texto', render: (i) => `${esc(i.archivo)}${i.origen === 'migracion' ? ' <span class="tenue">(migración)</span>' : ''}<span class="tenue bloque">${esc(i.usuario_email || '')}</span>` },
+        { key: 'archivo', label: 'Archivo y quién cargó', clase: 'col-texto', render: (i) => `${esc(i.archivo)}${i.origen === 'migracion' ? ' <span class="tenue">(migración)</span>' : ''}<span class="tenue bloque">${esc(i.cargado_por || i.usuario_email || 'Sin nombre')}</span>` },
         { key: 'total', label: 'Registros', alinear: 'num' },
         { key: 'nuevas', label: 'Nuevas', alinear: 'num' },
         { key: 'modificadas', label: 'Modificadas', alinear: 'num' },
@@ -205,7 +212,7 @@ async function migracion(files, cont, app) {
       if (s.ok || (confirmar && s.error)) continue;
       pintar(`${confirmar ? 'Guardando' : 'Comparando'} ${i} de ${cargas.length}: semana del ${etiquetaSemana(c.semana)}, ${c.area}…`);
       try {
-        const res = await db.sincronizar(armarPayload({ archivo: c.archivo, hash: null, area: c.area, semana: c.semana, filas: c.filas, origen: 'migracion' }), confirmar);
+        const res = await db.sincronizar(armarPayload({ archivo: c.archivo, hash: null, area: c.area, semana: c.semana, filas: c.filas, origen: 'migracion', cargadoPor: cargadoPor() }), confirmar);
         if (confirmar) s.ok = res; else s.previa = res;
         s.error = null;
       } catch (e) { s.error = e.message; }
