@@ -123,8 +123,9 @@ informa acá, sino en el módulo *Riesgos y Auditoría*, para no duplicar.
 - **Atomicidad:** todo o nada, en una sola transacción.
 - **Sin duplicados:** al final de cada carga se verifica que no existan dos actividades
   vigentes con la misma clave; si existieran, se revierte la carga completa.
-- **Seguridad:** solo usuarios autenticados pueden ejecutar la función; las tablas no
-  admiten inserciones ni borrados directos desde la aplicación.
+- **Acceso:** la aplicación es pública para quien tenga el enlace. Las tablas no admiten
+  inserciones ni borrados directos: los datos del Excel solo cambian a través de esta
+  función, y cada carga queda registrada con el nombre indicado en *Cargado por*.
 
 ## 9. Pruebas realizadas (25/09/2026)
 
@@ -138,4 +139,4 @@ informa acá, sino en el módulo *Riesgos y Auditoría*, para no duplicar.
 | Tarea borrada del Excel | Retirada (no eliminada) |
 | Tarea borrada que vuelve | Reactivada, sin duplicar |
 | Horas reales cargadas en la app + nueva carga | Horas reales conservadas |
-| Visitante sin sesión | No puede leer ni importar |
+| Visitante con el enlace (acceso público, migración 006) | Puede ver, importar y cargar horas reales; no puede borrar ni editar datos del Excel |
