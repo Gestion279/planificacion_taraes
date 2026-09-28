@@ -21,7 +21,31 @@
   <link rel="stylesheet" href="/css/app.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" defer></script>
-  <script type="module" src="/js/app.js"></script>
+  <script>
+    // Si la aplicación no puede arrancar (por ejemplo, falta subir un archivo), se muestra el motivo en lugar de una página vacía.
+    window.__falloCarga = async function (e) {
+      var faltan = [];
+      try {
+        var sw = await (await fetch('/sw.js', { cache: 'no-store' })).text();
+        var lista = (sw.match(/'\/[^']+\.(js|css|html|webmanifest|svg|png)'/g) || []).map(function (x) { return x.slice(1, -1); });
+        for (var i = 0; i < lista.length; i++) {
+          var r = await fetch(lista[i], { method: 'HEAD', cache: 'no-store' });
+          if (!r.ok) faltan.push(lista[i]);
+        }
+      } catch (_) { /* sin conexión */ }
+      var msg = String((e && e.message) || e);
+      document.body.innerHTML = '<div class="error-bloque" style="max-width:720px;margin:60px auto;padding:24px;background:#fff;border:1px solid #E4DDD0;border-radius:6px;font-family:system-ui,sans-serif">'
+        + '<h1 style="font-size:20px;margin:0 0 10px">La aplicación no pudo iniciar</h1>'
+        + (faltan.length
+          ? '<p>Faltan estos archivos en la publicación. Subilos a GitHub con la misma estructura de carpetas:</p><ul>' + faltan.map(function (f) { return '<li><code>' + f + '</code></li>'; }).join('') + '</ul>'
+          : '<p>Algún archivo de la aplicación no coincide con los demás. Lo más seguro es volver a subir a GitHub el paquete completo.</p>')
+        + '<p style="color:#5C6769;font-size:13px">Detalle técnico: ' + msg.replace(/</g, '&lt;') + '</p>'
+        + '<p style="color:#5C6769;font-size:13px">Si ya lo corregiste, recargá la página con Ctrl + F5.</p></div>';
+    };
+  </script>
+  <script type="module">
+    import('/js/app.js').catch(function (e) { window.__falloCarga(e); });
+  </script>
 </head>
 <body>
   <div id="app" hidden>
@@ -48,6 +72,7 @@
       <a data-mod="riesgos" href="#/riesgos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01"/></svg><span class="l-largo">Riesgos y auditoría</span><span class="l-corto">Riesgos</span></a>
       <a data-mod="evolucion" href="#/evolucion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>Evolución</span></a>
       <a data-mod="mejoras" href="#/mejoras"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span class="l-largo">Propuestas de mejora</span><span class="l-corto">Mejoras</span></a>
+      <a data-mod="repetitivas" href="#/repetitivas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg><span class="l-largo">Tareas repetitivas</span><span class="l-corto">Repetidas</span></a>
       <a data-mod="carga" href="#/carga"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M4 15v5h16v-5"/></svg><span>Carga</span></a>
     </nav>
 
