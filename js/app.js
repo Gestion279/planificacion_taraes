@@ -2,30 +2,87 @@
 // Planificación de tareas — núcleo de la aplicación
 // =====================================================================
 import * as db from './db.js';
-import { esc, rangoSemana, limpiarGraficos, aviso, pedirClave } from './ui.js';
+import { esc, rangoSemana, limpiarGraficos, aviso, pedirClave, multiSelect } from './ui.js';
 import { addDays, CTX } from './engine.js';
 import * as resumen from './modules/resumen.js';
 import * as planificacion from './modules/planificacion.js';
 import * as personas from './modules/personas.js';
 import * as riesgos from './modules/riesgos.js';
 import * as evolucion from './modules/evolucion.js';
+import * as mejoras from './modules/mejoras.js';
+import * as repetitivas from './modules/repetitivas.js';
 import * as carga from './modules/carga.js';
 
-const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, carga };
+const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, mejoras, repetitivas, carga };
 
 // ---------- estado compartido (una sola fuente de datos para todos los módulos) ----------
 export const app = {
   semanas: [],          // [{id, inicio, fin, actividades}] desc
   semana: null,         // semana seleccionada
-  filas: [],            // actividades de la semana seleccionada
-  filasPrevia: [],      // actividades de la semana anterior cargada
-  cambiosSemana: [],    // cambios posteriores a la primera carga (semana seleccionada)
+  filas: [],            // actividades de la semana seleccionada (ya filtradas por los filtros globales)
+  filasPrevia: [],      // actividades de la semana anterior cargada (ídem)
+  cambiosSemana: [],    // cambios posteriores a la primera carga (semana seleccionada, ídem)
   areas: [],
+  personas: [],         // catálogo de personas [{id, nombre, area}] para los filtros
+  // Filtros globales: se aplican a todas las hojas y se conservan al navegar y al recargar la página.
+  filtros: { areas: [], personas: [] },
+  _limpiadores: new Map(),   // cada hoja registra cómo limpiar sus filtros propios
+  _sinFiltrar: { filas: [], previa: [], cambios: [] },
   modulo: 'resumen',
   params: {},
   _cache: new Map(),
   _completas: new Set(),
   _cacheCambios: new Map(),
+
+  // ¿La fila pasa los filtros globales? (actividades, cambios o registros persona-semana)
+  pasa(r) {
+    const f = this.filtros;
+    return (!f.areas.length || f.areas.includes(r.area)) && (!f.personas.length || f.personas.includes(r.persona));
+  },
+  hayFiltros() {
+    const propios = Object.values(this._filtrosHoja).reduce((a, f) => a + Object.values(f).reduce((b, v) => b + (Array.isArray(v) ? v.length : v ? 1 : 0), 0), 0);
+    return this.filtros.areas.length + this.filtros.personas.length + propios;
+  },
+
+  // Cambia filtros globales (desde la barra o desde una hoja) y vuelve a dibujar la hoja actual
+  async fijarFiltros(patch, { redibujar = true } = {}) {
+    Object.assign(this.filtros, patch);
+    // una persona seleccionada que no es de las áreas elegidas deja de estar seleccionada
+    if (this.filtros.areas.length) {
+      const validas = new Set(this.personas.filter((p) => this.filtros.areas.includes(p.area)).map((p) => p.nombre));
+      this.filtros.personas = this.filtros.personas.filter((n) => validas.has(n));
+    }
+    try { sessionStorage.setItem('planif.filtros', JSON.stringify(this.filtros)); } catch { /* preferencia opcional */ }
+    this.aplicarFiltros();
+    pintarFiltros({ cambioAreas: 'areas' in patch });
+    if (redibujar) await render({ mantenerScroll: true });
+  },
+
+  aplicarFiltros() {
+    const p = (r) => this.pasa(r);
+    this.filas = this._sinFiltrar.filas.filter(p);
+    this.filasPrevia = this._sinFiltrar.previa.filter(p);
+    this.cambiosSemana = this._sinFiltrar.cambios.filter(p);
+  },
+
+  // Cada hoja registra una función que limpia sus filtros propios (día, prioridad, nivel…)
+  registrarLimpieza(modulo, limpiar, cuenta) { this._limpiadores.set(modulo, { limpiar, cuenta }); },
+  refrescarContadorFiltros() { pintarFiltros(); this.guardarFiltrosHoja(); },
+  // Filtros propios de cada hoja: se guardan en la sesión del navegador junto con los globales
+  _filtrosHoja: {},
+  filtrosHoja(modulo, inicial) {
+    const obj = { ...inicial, ...(this._filtrosHoja[modulo] || {}) };
+    this._filtrosHoja[modulo] = obj;
+    return obj;
+  },
+  guardarFiltrosHoja() { try { sessionStorage.setItem('planif.filtrosHoja', JSON.stringify(this._filtrosHoja)); } catch { /* opcional */ } },
+  async limpiarFiltros() {
+    this._limpiadores.forEach((x) => x.limpiar());
+    // también los de hojas no visitadas en esta sesión (se vacían en el mismo objeto que usa cada hoja)
+    Object.values(this._filtrosHoja).forEach((f) => Object.keys(f).forEach((k) => { if (Array.isArray(f[k])) f[k].length = 0; else f[k] = ''; }));
+    this.guardarFiltrosHoja();
+    await this.fijarFiltros({ areas: [], personas: [] });
+  },
 
   semanaPrevia() {
     const i = this.semanas.findIndex((s) => s.id === this.semana?.id);
@@ -57,10 +114,11 @@ export const app = {
       cambios.forEach((c) => this._cacheCambios.get(c.semanaId)?.push(c));
       reales.forEach((x) => CTX.reales.set(`${x.semana}|${x.personaId}`, x.horas));
     }
+    const p = (r) => this.pasa(r);
     return {
       semanas: semanas.map((s) => s.inicio),
-      rows: semanas.flatMap((s) => this._cache.get(s.id)),
-      cambios: semanas.flatMap((s) => this._cacheCambios.get(s.id)),
+      rows: semanas.flatMap((s) => this._cache.get(s.id)).filter(p),
+      cambios: semanas.flatMap((s) => this._cacheCambios.get(s.id)).filter(p),
     };
   },
 
@@ -77,12 +135,16 @@ export const app = {
 
   async seleccionarSemana(id) {
     this.semana = this.semanas.find((s) => s.id === id) || this.semanas[0] || null;
-    if (!this.semana) { this.filas = []; this.filasPrevia = []; this.cambiosSemana = []; return; }
+    if (!this.semana) { this._sinFiltrar = { filas: [], previa: [], cambios: [] }; this.aplicarFiltros(); return; }
     const prev = this.semanaPrevia();
-    const { rows, cambios } = await this.filasDe(prev ? [this.semana, prev] : [this.semana], { completas: true });
-    this.filas = rows.filter((r) => r.semanaId === this.semana.id);
-    this.filasPrevia = prev ? rows.filter((r) => r.semanaId === prev.id) : [];
-    this.cambiosSemana = cambios.filter((c) => c.semanaId === this.semana.id);
+    const sems = prev ? [this.semana, prev] : [this.semana];
+    await this.filasDe(sems, { completas: true });
+    this._sinFiltrar = {
+      filas: this._cache.get(this.semana.id) || [],
+      previa: prev ? this._cache.get(prev.id) || [] : [],
+      cambios: (this._cacheCambios.get(this.semana.id) || []),
+    };
+    this.aplicarFiltros();
   },
 
   // Se llama después de una carga: recarga la lista de semanas y vacía la caché
@@ -91,6 +153,8 @@ export const app = {
     await this.cargarContexto();
     this.semanas = await db.semanas();
     this.areas = await db.areas();
+    this.personas = await db.personas();
+    armarFiltros();
     const destino = semanaInicio ? this.semanas.find((s) => s.inicio === semanaInicio) : this.semana;
     await this.seleccionarSemana(destino?.id || this.semanas[0]?.id);
     pintarSelector();
@@ -132,7 +196,8 @@ async function cambiarSemana(id) {
   finally { main.removeAttribute('aria-busy'); }
 }
 
-async function render() {
+async function render(opc = {}) {
+  const mantenerScroll = opc && opc.mantenerScroll === true;
   const [, ruta = 'resumen', query = ''] = location.hash.match(/^#\/([a-z]+)\??(.*)$/) || [];
   app.modulo = MODULOS[ruta] ? ruta : 'resumen';
   app.params = Object.fromEntries(new URLSearchParams(query));
@@ -140,7 +205,8 @@ async function render() {
   const mod = MODULOS[app.modulo];
   document.title = `${mod.titulo} · Planificación de tareas`;
   limpiarGraficos();
-  window.scrollTo(0, 0);
+  if (!mantenerScroll) window.scrollTo(0, 0);
+  document.body.classList.toggle('sin-filtros-globales', app.modulo === 'carga');
   const main = $('#contenido');
   if (!app.semanas.length && app.modulo !== 'carga') {
     main.innerHTML = `<section class="vacio-inicial">
@@ -149,20 +215,58 @@ async function render() {
       <a class="btn primario" href="#/carga">Ir a Carga</a></section>`;
     return;
   }
-  main.innerHTML = '<div class="cargando">Cargando…</div>';
-  try { await mod.render(main, app); }
+  if (!mantenerScroll) main.innerHTML = '<div class="cargando">Cargando…</div>';
+  try { await mod.render(main, app); pintarFiltros(); }
   catch (e) { console.error(e); main.innerHTML = `<div class="error-bloque"><h2>No se pudo mostrar ${esc(mod.titulo)}</h2><p>${esc(e.message)}</p></div>`; }
-  main.focus({ preventScroll: true });
+  if (!mantenerScroll) main.focus({ preventScroll: true });
+}
+
+// ---------- filtros globales (barra superior) ----------
+// Los desplegables se arman una vez; al filtrar solo se actualiza lo necesario (el panel abierto no se cierra).
+const MS = { area: null, persona: null };
+function armarFiltroPersona() {
+  const opciones = app.personas
+    .filter((p) => !app.filtros.areas.length || app.filtros.areas.includes(p.area))
+    .sort((a, b) => (a.area || '').localeCompare(b.area || '') || a.nombre.localeCompare(b.nombre, 'es'))
+    .map((p) => ({ valor: p.nombre, texto: p.nombre, grupo: p.area || 'Sin área' }));
+  const nuevo = multiSelect({ etiqueta: 'Persona', opciones, seleccion: app.filtros.personas, todos: 'Todas', compacto: true,
+    onChange: (v) => app.fijarFiltros({ personas: v }) });
+  if (MS.persona) MS.persona.replaceWith(nuevo); else $('#filtros-globales').append(nuevo);
+  MS.persona = nuevo;
+}
+function armarFiltros() {
+  const cont = $('#filtros-globales');
+  cont.replaceChildren();
+  MS.area = multiSelect({ etiqueta: 'Área', opciones: app.areas.map((a) => ({ valor: a.nombre, texto: a.nombre })), seleccion: app.filtros.areas,
+    todos: 'Todas', compacto: true, onChange: (v) => app.fijarFiltros({ areas: v }) });
+  cont.append(MS.area);
+  MS.persona = null;
+  armarFiltroPersona();
+  pintarFiltros();
+}
+// Sincroniza los desplegables con el estado y actualiza el botón "Limpiar filtros"
+function pintarFiltros({ cambioAreas = false } = {}) {
+  if (!MS.area) return;
+  if (cambioAreas) armarFiltroPersona();
+  MS.area.fijar(app.filtros.areas);
+  MS.persona.fijar(app.filtros.personas);
+  const n = app.hayFiltros();
+  const b = $('#limpiar-filtros');
+  b.disabled = !n;
+  b.innerHTML = `Limpiar<span class="lf-largo"> filtros</span>${n ? ` <span class="cnt">${n}</span>` : ''}`;
 }
 
 async function entrarApp() {
   $('#app').hidden = false;
   $('#contenido').innerHTML = '<div class="cargando">Cargando semanas…</div>';
-  const [semanas, areas] = await Promise.all([db.semanas(), db.areas(), app.cargarContexto()]);
-  app.semanas = semanas; app.areas = areas;
+  const [semanas, areas, personas] = await Promise.all([db.semanas(), db.areas(), db.personas(), app.cargarContexto()]);
+  app.semanas = semanas; app.areas = areas; app.personas = personas;
+  try { const f = JSON.parse(sessionStorage.getItem('planif.filtros') || 'null'); if (f) app.filtros = { areas: f.areas || [], personas: f.personas || [] }; } catch { /* sin filtros guardados */ }
+  try { app._filtrosHoja = JSON.parse(sessionStorage.getItem('planif.filtrosHoja') || '{}'); } catch { app._filtrosHoja = {}; }
   // Al abrir: última semana cargada (no la semana calendario).
   await app.seleccionarSemana(app.semanas[0]?.id);
   pintarSelector();
+  armarFiltros();
   await render();
 }
 
@@ -174,7 +278,8 @@ async function iniciar() {
   $('#semana').addEventListener('change', (e) => cambiarSemana(e.target.value));
   $('#sem-prev').addEventListener('click', () => { const i = app.semanas.findIndex((s) => s.id === app.semana.id); if (app.semanas[i + 1]) cambiarSemana(app.semanas[i + 1].id); });
   $('#sem-next').addEventListener('click', () => { const i = app.semanas.findIndex((s) => s.id === app.semana.id); if (i > 0) cambiarSemana(app.semanas[i - 1].id); });
-  window.addEventListener('hashchange', render);
+  window.addEventListener('hashchange', () => render());
+  $('#limpiar-filtros').addEventListener('click', () => app.limpiarFiltros());
 
   try { await entrarApp(); }
   catch (e) { $('#app').hidden = false; $('#contenido').innerHTML = `<div class="error-bloque"><h2>No se pudieron cargar los datos</h2><p>${esc(e.message)}</p></div>`; }

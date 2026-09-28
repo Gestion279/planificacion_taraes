@@ -146,3 +146,55 @@ export function pedirClave(reintento = false) {
   });
   return pedidoEnCurso;
 }
+
+// ---------- filtro de selección múltiple ----------
+// opciones: [{ valor, texto, grupo? }]; seleccion: array de valores (vacío = sin filtro)
+// onChange(nuevaSeleccion) se llama en cada cambio: el filtrado es inmediato.
+let multiAbierto = null;
+document.addEventListener('click', (e) => { if (multiAbierto && !multiAbierto.contains(e.target)) cerrarMulti(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && multiAbierto) { const b = multiAbierto.querySelector('.ms-btn'); cerrarMulti(); b?.focus(); } });
+function cerrarMulti() { if (!multiAbierto) return; multiAbierto.classList.remove('abierto'); multiAbierto.querySelector('.ms-btn')?.setAttribute('aria-expanded', 'false'); multiAbierto = null; }
+
+export function multiSelect({ etiqueta, opciones, seleccion = [], onChange, todos = 'Todas', compacto = false }) {
+  let sel = new Set(seleccion.filter((v) => opciones.some((o) => String(o.valor) === String(v))));
+  const el = h(`<div class="ms ${compacto ? 'ms-compacto' : ''}">
+    <span class="ms-etq">${esc(etiqueta)}</span>
+    <button type="button" class="ms-btn" aria-haspopup="true" aria-expanded="false">${compacto ? `<span class="ms-pref" aria-hidden="true">${esc(etiqueta)}</span>` : ''}<span class="ms-txt"></span><span class="ms-flecha" aria-hidden="true"></span></button>
+    <div class="ms-panel" role="group" aria-label="${esc(etiqueta)}">
+      ${opciones.length > 8 ? `<input type="search" class="ms-buscar" placeholder="Buscar…" aria-label="Buscar en ${esc(etiqueta)}">` : ''}
+      <div class="ms-acc"><button type="button" data-todos>Seleccionar todo</button><button type="button" data-ninguno>Quitar selección</button></div>
+      <div class="ms-lista">${(() => { let g = null; return opciones.map((o) => {
+        const cab = o.grupo && o.grupo !== g ? `<div class="ms-grupo">${esc((g = o.grupo))}</div>` : '';
+        return `${cab}<label class="ms-op" data-texto="${esc(String(o.texto).toLowerCase())}"><input type="checkbox" value="${esc(o.valor)}"><span>${esc(o.texto)}</span></label>`; }).join(''); })()}
+        ${opciones.length ? '' : '<p class="ms-vacio">Sin opciones</p>'}</div>
+    </div></div>`);
+  const btn = el.querySelector('.ms-btn');
+  const pintar = () => {
+    el.querySelectorAll('.ms-op input').forEach((c) => { c.checked = sel.has(c.value); });
+    const n = sel.size;
+    el.querySelector('.ms-txt').textContent = !n ? todos : n === 1 ? (opciones.find((o) => sel.has(String(o.valor)))?.texto ?? '1 seleccionada') : `${n} seleccionadas`;
+    el.classList.toggle('activo', n > 0);
+  };
+  const avisar = () => { pintar(); onChange([...sel]); };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (el.classList.contains('abierto')) { cerrarMulti(); return; }
+    cerrarMulti(); el.classList.add('abierto'); btn.setAttribute('aria-expanded', 'true'); multiAbierto = el;
+    (el.querySelector('.ms-buscar') || el.querySelector('.ms-op input'))?.focus();
+  });
+  el.querySelectorAll('.ms-op input').forEach((c) => c.addEventListener('change', () => { c.checked ? sel.add(c.value) : sel.delete(c.value); avisar(); }));
+  el.querySelector('[data-ninguno]').addEventListener('click', () => { sel = new Set(); avisar(); });
+  el.querySelector('[data-todos]').addEventListener('click', () => {
+    // "todo" = las opciones visibles (respeta la búsqueda)
+    el.querySelectorAll('.ms-op').forEach((l) => { if (!l.hidden) sel.add(l.querySelector('input').value); });
+    if (sel.size === opciones.length) sel = new Set();   // todas seleccionadas equivale a no filtrar
+    avisar();
+  });
+  el.querySelector('.ms-buscar')?.addEventListener('input', (e) => {
+    const t = e.target.value.trim().toLowerCase();
+    el.querySelectorAll('.ms-op').forEach((l) => { l.hidden = !!t && !l.dataset.texto.includes(t); });
+  });
+  pintar();
+  el.fijar = (valores) => { sel = new Set(valores.map(String)); pintar(); };
+  return el;
+}
