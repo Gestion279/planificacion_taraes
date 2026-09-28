@@ -12,7 +12,7 @@ Aplicación única para la planificación semanal: se sube el Excel de cada áre
 
 ### 1. Supabase (ya está hecho)
 
-El proyecto `planificacion_tareas` ya tiene aplicadas las 6 migraciones de `supabase/migrations/`. No hay que crear usuarios.
+El proyecto `planificacion_tareas` ya tiene aplicadas las 7 migraciones de `supabase/migrations/`. No hay que crear usuarios.
 
 **Acceso:** la aplicación es pública para quien tenga el enlace de Vercel. Cualquiera con el enlace puede ver, subir el Excel y cargar horas reales o evaluar riesgos. Lo que **no** se puede hacer es borrar datos ni modificar a mano lo que viene del Excel: esos datos solo cambian subiendo un Excel nuevo, y cada carga queda en el historial con el nombre indicado en *Cargado por*. Conviene compartir el enlace solo con el equipo.
 
@@ -53,6 +53,37 @@ La clave de `SUPABASE_ANON_KEY` es la **pública** (publishable) y está pensada
 
 ---
 
+## Uso semanal
+
+**Estado (columna H del Excel).** Para que el cumplimiento se pueda medir, usar solo estos cuatro valores: **Pendiente**, **En curso**, **Cumplida** y **Cancelada** (las canceladas no cuentan para el cumplimiento). Conviene fijarlos con una lista desplegable en la plantilla: seleccionar la columna H → *Datos → Validación de datos → Lista* → `Pendiente,En curso,Cumplida,Cancelada`. Cualquier otro texto aparece en Auditoría como *Estado no reconocido*.
+
+**Tiempo (columna E).** Se puede escribir en horas (`1,5`) o en formato hora (`1:30`). Si una celda tiene un valor de hora pero formato numérico (se ve `0,04` en lugar de `1:00`), la carga lo detecta, lo convierte a horas y lo avisa.
+
+**Horas reales.** En *Personas*, con la semana seleccionada: un total por persona para la semana. El desvío compara ese total con lo planificado.
+
+**Jornada.** En el detalle de cada persona se puede cambiar su jornada semanal de referencia (por defecto 44 h). La ocupación y la sobrecarga se calculan sobre esa jornada.
+
+**Riesgos declarados.** Al evaluar probabilidad e impacto de un riesgo, la evaluación queda guardada para esa persona y ese texto: cuando el mismo riesgo vuelve a aparecer en semanas siguientes, ya viene evaluado.
+
+**Auditoría.** Una observación que ya se revisó (por ejemplo, un viaje real de 12 h) se puede marcar como revisada y deja de aparecer para esa persona y esa tarea.
+
+**Personas con el nombre mal escrito.** Si una carga trae una persona nueva con un nombre parecido a una existente, la vista previa lo avisa. Si ya se guardó, en *Carga → Unificar personas* se juntan las dos; el nombre mal escrito queda como alias y las próximas cargas se corrigen solas.
+
+**Cobertura de carga.** El Resumen indica cuántas de las personas habituales (las que planificaron en alguna de las 4 semanas anteriores) cargaron su planificación, y quiénes faltan.
+
+**Semanas de junio.** Están en el Histórico anterior y todavía no se migraron. En *Carga → Migrar el historial*, al elegir los dos HTML quedan marcadas solo las semanas que todavía no existen en la base, para no pisar lo cargado desde los Excel.
+
+## Clave de carga (opcional)
+
+Ver la aplicación es libre para quien tenga el enlace. Si se define una clave, **guardar** (confirmar cargas, horas reales, jornadas, riesgos, auditoría, unificar personas) la pide una vez y el navegador la recuerda. La vista previa de una carga no la necesita.
+
+Para activarla, cambiarla o quitarla, en Supabase → *SQL Editor*:
+
+```sql
+select public.definir_clave_carga('la-clave-del-equipo');   -- activar o cambiar
+select public.definir_clave_carga(null);                    -- quitar
+```
+
 ## Estructura
 
 ```
@@ -71,7 +102,8 @@ js/
   detalle.js             Detalle de actividad, historial y horas reales
   ui.js                  Tablas, gráficos, formato
   modules/               Resumen, Planificación, Personas, Riesgos y auditoría, Evolución, Carga
-supabase/migrations/     Modelo de datos, permisos, sincronización, vistas y acceso público
+supabase/migrations/     Modelo de datos, permisos, sincronización, vistas, acceso público y mejoras
+tests/                   Pruebas automáticas del motor y del lector de Excel (npm test)
 docs/SINCRONIZACION.md   Cómo se identifica cada tarea y cómo se evita duplicar
 ```
 
@@ -101,6 +133,15 @@ vercel dev
 
 Cada vez que se sube un cambio a GitHub, Vercel publica la versión nueva automáticamente. Si se modifican archivos de la aplicación, conviene cambiar `CACHE = 'planificacion-v1'` en `sw.js` (por ejemplo a `v2`), así las aplicaciones instaladas descargan todo de nuevo.
 
+## Pruebas automáticas
+
+```
+npm install
+npm test
+```
+
+Verifican el motor de análisis (indicadores, alertas, auditoría, estados, jornadas) y el lector del Excel (encabezados, fechas, horas en formato hora, filas vacías). Conviene correrlas antes de subir cambios en `js/engine.js` o `js/excel.js`.
+
 ## Si más adelante se quiere restringir el acceso
 
-La base ya tiene preparadas las columnas de usuario (`usuario_id`, `usuario_email`) y las políticas para usuarios autenticados. Para volver a exigir inicio de sesión alcanza con quitar los permisos de `anon` de la migración 006 y reponer la pantalla de ingreso.
+Para limitar quién guarda cambios alcanza con definir la clave de carga (arriba). Para restringir también quién **ve**, la base ya tiene preparadas las columnas de usuario (`usuario_id`, `usuario_email`) y las políticas para usuarios autenticados: habría que quitar los permisos de lectura de `anon` y reponer una pantalla de ingreso.
