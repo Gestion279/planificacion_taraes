@@ -358,10 +358,12 @@ s { color: var(--tinta-3); }
   .sem-sel { flex: 1; }
   .nav { top: auto; bottom: 0; right: 0; width: auto; height: auto; flex-direction: row; padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
     border-right: 0; border-top: 1px solid var(--linea); background: #fff; z-index: 30; gap: 0; }
-  .nav a { flex: 1; flex-direction: column; gap: 2px; font-size: 10.5px; padding: 6px 2px; border-left: 0; border-top: 3px solid transparent; border-radius: 0; text-align: center; }
+  .nav a { flex: 1; min-width: 0; flex-direction: column; gap: 2px; font-size: 9px; letter-spacing: -0.02em; padding: 6px 0; border-left: 0; border-top: 3px solid transparent; border-radius: 0; text-align: center; }
   .nav a[aria-current="page"] { border-top-color: var(--bluffs); background: var(--lienzo); }
   .nav a:last-child { margin-top: 0; }
   .l-largo { display: none; } .l-corto { display: inline; }
+  .nav a > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav a > span.l-largo { display: none; }
   #contenido { margin-left: 0; padding: 16px 12px calc(84px + env(safe-area-inset-bottom, 0px)); }
   .grid-2 { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
@@ -456,3 +458,74 @@ s { color: var(--tinta-3); }
   .kpis.kpis-3 .kpi:nth-child(3) { border-left: 0; border-top: 1px solid var(--linea); }
   .informe-persona { grid-template-columns: 1fr; gap: 8px; }
 }
+
+/* ---------------- filtros de selección múltiple ---------------- */
+.ms { position: relative; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--tinta-2); font-weight: 500; min-width: 150px; }
+.ms-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 6px 10px; width: 100%;
+  font: 14px var(--fuente); color: var(--tinta); background: #fff; border: 1px solid var(--linea-f); border-radius: 5px; cursor: pointer; text-align: left; }
+.ms-btn:hover { border-color: var(--beige); }
+.ms-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.ms-flecha { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: .6; flex: none; }
+.ms.activo .ms-btn { border-color: var(--bluffs); background: #FBF4EA; font-weight: 600; }
+.ms-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 45; min-width: 250px; max-width: 320px; background: #fff; color: var(--tinta);
+  border: 1px solid var(--linea-f); border-radius: 6px; box-shadow: 0 8px 24px rgba(43, 52, 54, .18); padding: 8px; font-weight: 400; }
+.ms.abierto .ms-panel { display: block; }
+.ms-buscar { width: 100%; margin-bottom: 6px; }
+.ms-acc { display: flex; justify-content: space-between; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--linea); margin-bottom: 4px; }
+.ms-acc button { all: unset; cursor: pointer; font-size: 12.5px; color: var(--bluffs-txt); font-weight: 600; }
+.ms-acc button:hover { text-decoration: underline; }
+.ms-acc button:focus-visible { outline: 2px solid var(--bluffs); border-radius: 3px; }
+.ms-lista { max-height: 300px; overflow-y: auto; }
+.ms-grupo { font-size: 11px; font-weight: 700; color: var(--tinta-3); text-transform: uppercase; letter-spacing: .04em; padding: 8px 6px 2px; }
+.ms-op { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 4px; cursor: pointer; font-size: 13.5px; }
+.ms-op:hover { background: var(--lienzo); }
+.ms-op input { width: 16px; height: 16px; accent-color: var(--bluffs); margin: 0; flex: none; }
+.ms-vacio { color: var(--tinta-3); margin: 6px; }
+
+/* ---------------- filtros globales en la barra superior ---------------- */
+.filtros-barra { display: flex; align-items: center; gap: 8px; }
+.filtros-globales { display: flex; gap: 8px; }
+.ms-compacto { flex-direction: row; align-items: center; min-width: 0; }
+.ms-compacto .ms-etq { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.barra .ms-btn { background: rgba(240, 227, 209, .1); border-color: rgba(240, 227, 209, .28); color: #fff; min-height: 38px; min-width: 170px; }
+.barra .ms-btn:hover { background: rgba(240, 227, 209, .16); }
+.barra .ms.activo .ms-btn { background: var(--bluffs); border-color: var(--bluffs); color: #fff; }
+.barra .ms-txt { max-width: 170px; }
+.filtros-globales .ms:last-child .ms-panel { left: auto; right: 0; }
+.btn-limpiar { border: 1px solid rgba(240, 227, 209, .4); background: transparent; color: var(--sun); border-radius: 5px; padding: 0 12px; min-height: 38px;
+  font: 600 13px var(--fuente); cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.btn-limpiar:hover:not(:disabled) { background: rgba(240, 227, 209, .14); }
+.btn-limpiar:disabled { opacity: .45; cursor: default; }
+.btn-limpiar .cnt { background: var(--bluffs); color: #fff; border-radius: 9px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; display: inline-grid; place-items: center; }
+body.sin-filtros-globales .filtros-barra { visibility: hidden; }
+.semana-ctrl { margin-left: auto; margin-right: 0; }
+
+@media (max-width: 1280px) {
+  .marca span { display: none; }
+  .sem-sel select { min-width: 200px; }
+  .barra .ms-btn { min-width: 140px; }
+}
+@media (max-width: 1000px) {
+  .barra { height: auto; flex-wrap: wrap; row-gap: 8px; padding-top: calc(8px + env(safe-area-inset-top, 0px)); padding-bottom: 8px; }
+  .filtros-barra { order: 3; width: 100%; }
+  .filtros-globales { flex: 1; min-width: 0; }
+  .filtros-globales .ms { flex: 1; min-width: 0; }
+  .barra .ms-btn { min-width: 0; }
+  .nav { top: auto; }
+  body.sin-filtros-globales .filtros-barra { display: none; }
+}
+@media (min-width: 861px) and (max-width: 1000px) {
+  .nav { top: 104px; }
+}
+@media (max-width: 860px) {
+  .btn-limpiar { padding: 0 10px; }
+  .ms-panel { max-width: calc(100vw - 24px); }
+}
+
+/* opciones del desplegable dentro de formularios de filtros (no heredan el estilo de label) */
+.filtros .ms .ms-op { flex-direction: row; align-items: center; flex: none; font-size: 13.5px; color: var(--tinta); font-weight: 400; gap: 8px; }
+.ms-acc button { white-space: nowrap; }
+.ms-pref { font-size: 12px; font-weight: 500; opacity: .75; margin-right: -2px; flex: none; }
+.ms-btn .ms-txt { flex: 1; }
+.barra .ms.activo .ms-pref { opacity: .9; }
+@media (max-width: 860px) { .lf-largo { display: none; } }
