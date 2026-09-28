@@ -2,7 +2,7 @@
 // 📊 Resumen — vista ejecutiva de la semana seleccionada.
 // Es el lugar PRINCIPAL de los indicadores de semana.
 // =====================================================================
-import { kpisSemana, statsPersonas, auditoria, recomendaciones, groupBy } from '../engine.js';
+import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy } from '../engine.js';
 import { esc, num, horas, porc, signo, rangoSemana, nivelBadge } from '../ui.js';
 
 export const titulo = 'Resumen';
@@ -32,6 +32,10 @@ export async function render(el, app) {
     return h && h.semanas >= 2 && h.horas > 0 && p.horas > 0 ? { ...p, prom: h.horas, var: ((p.horas - h.horas) / h.horas) * 100 } : null;
   }).filter((x) => x && Math.abs(x.var) >= 25).sort((a, b) => Math.abs(b.var) - Math.abs(a.var)).slice(0, 5);
 
+  // cobertura de carga: quienes planificaron en alguna de las 4 semanas anteriores y esta no
+  const previas4 = new Set(periodo.map((s) => s.inicio).filter((s) => s < app.semana.inicio).slice(-4));
+  const cob = coberturaCarga(app.filas, rango.filter((r) => previas4.has(r.semana)));
+
   const alertasTop = k.alertas.filter((a) => a.nivel !== 'info');
   const porRegla = groupBy(alertasTop, (a) => a.nombre);
   const aud = auditoria(app.filas, app.semana.inicio).filter((r) => r.grave && r.items.length).sort((a, b) => b.items.length - a.items.length);
@@ -52,7 +56,7 @@ export async function render(el, app) {
 
   <section class="kpis" aria-label="Indicadores de la semana">
     <div class="kpi"><span class="kpi-l">Actividades</span><span class="kpi-v">${num(k.actividades, 0)}</span>${delta(k.actividades, kp.actividades)}</div>
-    <div class="kpi"><span class="kpi-l">Personas</span><span class="kpi-v">${k.personas}</span>${delta(k.personas, kp.personas)}</div>
+    <div class="kpi"><span class="kpi-l">Personas</span><span class="kpi-v">${k.personas}${cob.faltan.length ? `<small> de ${cob.habituales}</small>` : ''}</span>${cob.faltan.length ? `<span class="delta d-mal">${cob.faltan.length} sin planificación cargada</span>` : delta(k.personas, kp.personas)}</div>
     <div class="kpi"><span class="kpi-l">Horas planificadas</span><span class="kpi-v">${num(k.horas)}<small> h</small></span>${delta(k.horas, kp.horas, { suf: ' h' })}</div>
     <div class="kpi"><span class="kpi-l">Cumplimiento</span><span class="kpi-v">${k.cumplimiento === null ? '<span class="kpi-nd">Sin datos</span>' : porc(k.cumplimiento)}</span>${k.cumplimiento === null ? '<span class="delta">no hay estados informados</span>' : delta(k.cumplimiento, kp.cumplimiento, { suf: ' pts' })}</div>
     <div class="kpi"><span class="kpi-l">Cobertura de seguimiento</span><span class="kpi-v">${porc(k.cobertura)}</span><span class="delta">actividades con estado</span></div>
@@ -64,6 +68,7 @@ export async function render(el, app) {
   <div class="grid-2">
     <section class="panel">
       <header class="panel-cab"><h2>Puntos a revisar</h2><a href="#/riesgos?tab=alertas">Todas las alertas</a></header>
+      ${cob.faltan.length ? `<p class="faltan"><span class="badge n-advertencia">Carga incompleta</span> <b>Sin planificación esta semana:</b> ${cob.faltan.map((f) => `${esc(f.persona)} <span class="tenue">(${esc(f.area)})</span>`).join(', ')}. Planificaron en alguna de las 4 semanas anteriores.</p>` : ''}
       ${alertasTop.length ? `<ul class="lista-alertas">${[...porRegla].slice(0, 6).map(([regla, as]) => `
         <li>${nivelBadge(as[0].nivel)} <b>${esc(regla)}</b>
           <span>${as.slice(0, 3).map((a) => `<a href="#/personas?persona=${encodeURIComponent(a.persona)}">${esc(a.persona)}</a> <span class="tenue">${esc(a.detalle)}</span>`).join('; ')}${as.length > 3 ? `; y ${as.length - 3} más` : ''}</span></li>`).join('')}</ul>`

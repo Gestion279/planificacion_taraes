@@ -6,7 +6,7 @@
 // Los tres se muestran separados: no son lo mismo.
 // =====================================================================
 import * as db from '../db.js';
-import { alertas, auditoria, REGLAS_ALERTA, NIVELES_RIESGO, nivelRiesgo, tieneRiesgo, norm, groupBy, diaDe } from '../engine.js';
+import { alertas, auditoria, REGLAS_ALERTA, NIVELES_RIESGO, nivelRiesgo, tieneRiesgo, norm, groupBy, diaDe, CTX, claveRiesgo, claveExcepcion } from '../engine.js';
 import { esc, num, porc, tabla, nivelBadge, riesgoBadge, opciones, aviso, fechaCorta, rangoSemana, prioBadge } from '../ui.js';
 import { abrirDetalle } from '../detalle.js';
 
@@ -40,17 +40,18 @@ async function riesgosDeclarados(c, app) {
   });
 
   // Un riesgo = mismo texto declarado por la misma persona en la semana (como el dashboard anterior)
-  const grupos = [...groupBy(app.filas.filter(tieneRiesgo), (r) => `${r.persona}|${norm(r.riesgos)}`)].map(([k, rs]) => {
-    const probs = new Set(rs.map((r) => r.riesgoProb || '')), imps = new Set(rs.map((r) => r.riesgoImpacto || ''));
-    const prob = probs.size === 1 ? [...probs][0] : '', imp = imps.size === 1 ? [...imps][0] : '';
-    return { k, persona: rs[0].persona, area: rs[0].area, riesgo: rs[0].riesgos, rows: rs, prob, imp,
-      nivel: nivelRiesgo(prob, imp), semanas: semanasPorRiesgo.get(k)?.size || 1, prioAlta: rs.some((r) => r.prioridad === 'Alta') };
+  const grupos = [...groupBy(app.filas.filter(tieneRiesgo), (r) => claveRiesgo(r.personaId, r.riesgos))].map(([k, rs]) => {
+    const ev = CTX.riesgos.get(k) || {};
+    const kp = `${rs[0].persona}|${norm(rs[0].riesgos)}`;
+    return { k, personaId: rs[0].personaId, persona: rs[0].persona, area: rs[0].area, riesgo: rs[0].riesgos, rows: rs,
+      prob: ev.prob || '', imp: ev.impacto || '', nivel: nivelRiesgo(ev.prob, ev.impacto),
+      semanas: semanasPorRiesgo.get(kp)?.size || 1, prioAlta: rs.some((r) => r.prioridad === 'Alta') };
   });
 
   const personas = [...new Set(grupos.map((g) => g.persona))].sort();
   const areas = [...new Set(grupos.map((g) => g.area))].sort();
   c.innerHTML = `
-    <p class="intro">Riesgos escritos por cada persona en la columna <b>Riesgos</b> del Excel. Asigná probabilidad e impacto para obtener el nivel; se guarda para todas las actividades con ese mismo riesgo.</p>
+    <p class="intro">Riesgos escritos por cada persona en la columna <b>Riesgos</b> del Excel. Asigná probabilidad e impacto para obtener el nivel. La evaluación queda guardada para esa persona y ese riesgo, y se aplica sola en las semanas en que lo vuelva a declarar.</p>
     <form class="filtros">
       <label>Persona<select name="persona">${opciones(personas, FR.persona, 'Todas')}</select></label>
       <label>Área<select name="area">${opciones(areas, FR.area, 'Todas')}</select></label>
@@ -69,7 +70,7 @@ async function riesgosDeclarados(c, app) {
       rows: vis, orden: { key: 'semanas', dir: -1 }, vacio: 'No hay riesgos declarados con estos filtros.',
       cols: [
         { key: 'persona', label: 'Persona', render: (g) => `<span class="nom">${esc(g.persona)}</span><span class="tenue bloque">${esc(g.area)}</span>` },
-        { key: 'riesgo', label: 'Riesgo declarado', clase: 'col-tarea', render: (g) => `${esc(g.riesgo)}<span class="tenue bloque">${g.rows.length === 1 ? `${esc(g.rows[0].tarea)}` : `${g.rows.length} actividades`}${g.prioAlta ? ', incluye prioridad Alta' : ''}</span>` },
+        { key: 'riesgo', label: 'Riesgo declarado', clase: 'col-riesgo', render: (g) => `${esc(g.riesgo)}<span class="tenue bloque">${g.rows.length === 1 ? `${esc(g.rows[0].tarea)}` : `${g.rows.length} actividades`}${g.prioAlta ? ', incluye prioridad Alta' : ''}</span>` },
         { key: 'semanas', label: 'Semanas', alinear: 'num', render: (g) => (g.semanas > 1 ? `<span title="Declarado en ${g.semanas} de las últimas 8 semanas">${g.semanas}</span>` : '1') },
         { key: 'prob', label: 'Probabilidad', render: (g) => sel(g, 'prob') },
         { key: 'imp', label: 'Impacto', render: (g) => sel(g, 'imp') },
@@ -89,13 +90,12 @@ const sel = (g, campo) => `<select class="sel-riesgo" data-g="${esc(g.k)}" data-
 
 async function guardar(s, grupos, app, repintar) {
   const g = grupos.find((x) => x.k === s.dataset.g);
-  const campo = s.dataset.campo === 'prob' ? 'riesgo_prob' : 'riesgo_impacto';
-  const local = s.dataset.campo === 'prob' ? 'riesgoProb' : 'riesgoImpacto';
+  const nuevo = { prob: g.prob, imp: g.imp, [s.dataset.campo]: s.value };
   s.disabled = true;
   try {
-    await Promise.all(g.rows.map((r) => db.actualizarActividad(r.id, { [campo]: s.value || null })));
-    g.rows.forEach((r) => app.actualizarLocal(r.id, { [local]: s.value || null }));
-    g[s.dataset.campo] = s.value; g.nivel = nivelRiesgo(g.prob, g.imp);
+    await db.evaluarRiesgo(g.personaId, norm(g.riesgo), g.riesgo, nuevo.prob, nuevo.imp);
+    if (!nuevo.prob && !nuevo.imp) CTX.riesgos.delete(g.k); else CTX.riesgos.set(g.k, { prob: nuevo.prob || null, impacto: nuevo.imp || null });
+    g.prob = nuevo.prob; g.imp = nuevo.imp; g.nivel = nivelRiesgo(g.prob, g.imp);
     repintar();
   } catch (e) { aviso(`No se guardó: ${e.message}`, 'error'); s.disabled = false; }
 }
@@ -139,28 +139,44 @@ function auditoriaDatos(c, app) {
   c.innerHTML = `
     <p class="intro">Calidad de los datos cargados. Indica qué está incompleto o inconsistente, dónde encontrarlo en el Excel y a quién afecta.</p>
     <section class="panel"><div data-resumen></div></section>
-    ${sel ? `<section class="panel"><header class="panel-cab"><h2>${esc(sel.nombre)}</h2><a href="#/riesgos?tab=auditoria">Cerrar</a></header><p class="porque">${esc(sel.porque)}</p><div data-det></div></section>` : ''}`;
+    ${sel ? `<section class="panel"><header class="panel-cab"><h2>${esc(sel.nombre)}</h2><a href="#/riesgos?tab=auditoria">Cerrar</a></header><p class="porque">${esc(sel.porque)} Si un caso está bien así (por ejemplo, un viaje de todo el día), marcalo como revisado: no vuelve a aparecer para esa persona y esa tarea.</p><div data-det></div>
+      ${sel.revisadas.length ? `<details class="revisadas"><summary>Revisadas (${sel.revisadas.length})</summary><div data-rev></div></details>` : ''}</section>` : ''}`;
 
   tabla(c.querySelector('[data-resumen]'), {
     rows: reglas, onRow: (r) => app.ir('riesgos', r.id === sel?.id ? { tab: 'auditoria' } : { tab: 'auditoria', regla: r.id }),
     cols: [
       { key: 'nombre', label: 'Qué revisar', render: (r) => `<span class="nom ${r.id === sel?.id ? 'sel' : ''}">${esc(r.nombre)}</span>${r.grave ? '' : ' <span class="tenue">(recomendado)</span>'}` },
-      { key: 'cant', label: 'Actividades', alinear: 'num', sort: (r) => r.items.length, render: (r) => (r.items.length ? num(r.items.length, 0) : '<span class="ok-txt">0</span>') },
+      { key: 'cant', label: 'Actividades', alinear: 'num', sort: (r) => r.items.length, render: (r) => `${r.items.length ? num(r.items.length, 0) : '<span class="ok-txt">0</span>'}${r.revisadas.length ? `<span class="tenue bloque">${r.revisadas.length} revisadas</span>` : ''}` },
       { key: 'pct', label: '% del total', alinear: 'num', render: (r) => porc(r.pct) },
       { key: 'personas', label: 'A quién afecta', sort: (r) => r.personas.length, render: (r) => (r.personas.length ? `${r.personas.slice(0, 3).map((p) => `${esc(p.persona)} (${p.cantidad})`).join(', ')}${r.personas.length > 3 ? ` y ${r.personas.length - 3} más` : ''}` : '<span class="tenue">—</span>') },
       { key: 'porque', label: 'Por qué revisarlo', clase: 'col-texto tenue' },
     ],
   });
 
-  if (sel) tabla(c.querySelector('[data-det]'), {
-    rows: sel.items, onRow: (r) => abrirDetalle(r, app), max: 500, vacio: 'Nada para revisar en esta regla.',
-    cols: [
+  const marcar = async (r, revisada, btn) => {
+    btn.disabled = true;
+    try {
+      await db.marcarRevisada(r.personaId, r.tareaNorm, sel.id, revisada);
+      const k = claveExcepcion(r, sel.id);
+      if (revisada) CTX.excepciones.add(k); else CTX.excepciones.delete(k);
+      auditoriaDatos(c, app);
+    } catch (e) { aviso(e.message, 'error'); btn.disabled = false; }
+  };
+  const colsDet = (revisada) => [
       { key: 'persona', label: 'Persona', render: (r) => `<span class="nom">${esc(r.persona)}</span>` },
       { key: 'donde', label: 'Dónde', sort: (r) => `${r.hoja}${String(r.fila).padStart(4, '0')}`, render: (r) => `Hoja "${esc(r.hoja)}", fila ${r.fila}` },
       { key: 'fecha', label: 'Fecha', render: (r) => `${diaDe(r).slice(0, 3)} ${fechaCorta(r.fecha)}` },
       { key: 'tarea', label: 'Tarea', clase: 'col-tarea', render: (r) => esc(r.tarea) || '<span class="tenue">Sin descripción</span>' },
       { key: 'prioridad', label: 'Prioridad', render: (r) => prioBadge(r.prioridad) },
       { key: 'horas', label: 'Tiempo', alinear: 'num', render: (r) => (r.horas ? `${num(r.horas)} h` : '<span class="tenue">—</span>') },
-    ],
-  });
+      { key: 'acc', label: '', render: (r) => `<button type="button" class="btn-mini" data-rev-id="${r.id}">${revisada ? 'Volver a mostrar' : 'Marcar revisada'}</button>` },
+  ];
+  if (!sel) return;
+  const conectar = (cont, lista, revisada) => {
+    tabla(cont, { rows: lista, onRow: (r) => abrirDetalle(r, app), max: 500, vacio: 'Nada para revisar en esta regla.', cols: colsDet(revisada) });
+    // delegación: sigue funcionando aunque la tabla se reordene
+    cont.addEventListener('click', (e) => { const b = e.target.closest('[data-rev-id]'); if (b) marcar(lista.find((x) => x.id === b.dataset.revId), !revisada, b); });
+  };
+  conectar(c.querySelector('[data-det]'), sel.items, false);
+  if (sel.revisadas.length) conectar(c.querySelector('[data-rev]'), sel.revisadas, true);
 }

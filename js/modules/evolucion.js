@@ -93,11 +93,11 @@ export async function render(el, app) {
   });
 
   if (serie.every((s) => s.desvioPct === null)) {
-    el.querySelector('[data-g4c]').innerHTML = '<p class="vacio">Todavía no hay horas reales cargadas. Se cargan en Personas, dentro del detalle de cada persona.</p>';
+    el.querySelector('[data-g4c]').innerHTML = '<p class="vacio">Todavía no hay horas reales cargadas. Se cargan en Personas, como un total semanal por persona.</p>';
   } else grafico(el.querySelector('[data-g4]'), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Desvío real vs plan', data: serie.map((s) => s.desvioPct), backgroundColor: serie.map((s) => ((s.desvioPct || 0) > 0 ? PALETA.crit : PALETA.ok)), borderRadius: 3 }] },
-    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${signo(c.raw, '%')} sobre las actividades con horas reales` } } },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${signo(c.raw, '%')}, sobre las personas con horas reales cargadas` } } },
       scales: { x: { grid: { display: false } }, y: { ticks: { callback: (v) => `${v}%` }, title: { display: true, text: 'real frente a plan' } } } },
   });
 

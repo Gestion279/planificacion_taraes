@@ -90,7 +90,7 @@ function pintarMatriz(cont, rows, app) {
   const dias = DIAS.filter((d, i) => i < 5 || rows.some((r) => diaDe(r) === d));
   const m = new Map();
   rows.forEach((r) => {
-    if (!m.has(r.persona)) m.set(r.persona, { area: r.area, total: 0, dias: {} });
+    if (!m.has(r.persona)) m.set(r.persona, { area: r.area, total: 0, dias: {}, jornada: Number(r.jornada) || CONFIG.jornada });
     const p = m.get(r.persona); const d = diaDe(r);
     p.total += r.horas || 0; p.dias[d] = (p.dias[d] || 0) + (r.horas || 0);
   });
@@ -103,7 +103,7 @@ function pintarMatriz(cont, rows, app) {
       <th scope="row"><a href="#/personas?persona=${encodeURIComponent(p)}">${esc(p)}</a></th>
       ${dias.map((d) => { const hh = v.dias[d] || 0; return `<td class="hm h${nivel(hh)}" title="${esc(p)}, ${d}: ${num(hh)} h">${hh ? num(hh) : ''}</td>`; }).join('')}
       <td class="num"><b>${num(v.total)}</b></td>
-      <td>${barraOcupacion((v.total / CONFIG.jornada) * 100)}</td></tr>`).join('')}
+      <td title="Jornada de ${num(v.jornada, 0)} h">${barraOcupacion((v.total / v.jornada) * 100)}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="nota">Horas planificadas por día. Ocupación sobre una jornada de ${CONFIG.jornada} h semanales; la marca indica el 100%.</p>`;
+    <p class="nota">Horas planificadas por día. Ocupación sobre la jornada semanal de cada persona (${CONFIG.jornada} h salvo que se indique otra en Personas); la marca indica el 100%.</p>`;
 }

@@ -3,10 +3,11 @@
 // Consolida: Evaluación/Resumen, Carga de trabajo, Prioridades,
 // Plan vs Real, Repetitivas e Histórico/Personas.
 // =====================================================================
-import { statsPersonas, alertas, repetitivasSemana, recurrentesPeriodo, recomendaciones, PRIORIDADES, DIAS, diaDe, estadoDe, CONFIG, groupBy } from '../engine.js';
+import * as db from '../db.js';
+import { statsPersonas, alertas, repetitivasSemana, recurrentesPeriodo, recomendaciones, PRIORIDADES, DIAS, diaDe, estadoDe, CONFIG, CTX, groupBy } from '../engine.js';
 import { esc, num, horas, porc, signo, tabla, barraApilada, barraOcupacion, prioBadge, nivelBadge, grafico, opciones,
-  COLOR_PRIORIDAD, PALETA, etiquetaSemana, fechaCorta, rangoSemana, fechaHora } from '../ui.js';
-import { abrirDetalle, inputReal, conectarReales } from '../detalle.js';
+  COLOR_PRIORIDAD, PALETA, etiquetaSemana, fechaCorta, rangoSemana, fechaHora, aviso } from '../ui.js';
+import { abrirDetalle } from '../detalle.js';
 
 export const titulo = 'Personas';
 const ALCANCES = [['semana', 'Semana seleccionada'], ['4', 'Últimas 4 semanas'], ['8', 'Últimas 8 semanas'], ['13', 'Últimos 3 meses']];
@@ -43,19 +44,33 @@ export async function render(el, app) {
     { key: 'horas', label: n > 1 ? 'Horas / sem.' : 'Horas', alinear: 'num', render: (p) => horas(p.horas) },
     { key: 'ocupacion', label: 'Ocupación', render: (p) => barraOcupacion(p.ocupacion) },
     { key: 'cumplimiento', label: 'Cumplimiento', alinear: 'num', render: (p) => (p.cumplimiento === null ? '<span class="tenue">Sin estados</span>' : `${porc(p.cumplimiento)}<span class="tenue bloque">${porc(p.cobertura)} con estado</span>`) },
-    { key: 'desvioPct', label: 'Desvío', alinear: 'num', render: (p) => (p.desvioPct === null ? '<span class="tenue">—</span>' : `<span class="${Math.abs(p.desvioPct) > 15 ? 'd-mal' : ''}">${signo(p.desvioPct, '%')}</span><span class="tenue bloque">${porc(p.coberturaReal)} con real</span>`) },
+    ...(n === 1 ? [{ key: 'realSemana', label: 'Horas reales', alinear: 'num',
+      render: (p) => `<input class="in-real" type="number" min="0" max="120" step="0.5" inputmode="decimal" data-persona="${p.personaId}" value="${p.realSemana ?? ''}" placeholder="—" aria-label="Horas reales de ${esc(p.persona)}">` }] : []),
+    { key: 'desvioPct', label: 'Desvío', alinear: 'num', render: (p) => (p.desvioPct === null ? '<span class="tenue">—</span>' : `<span class="${Math.abs(p.desvioPct) > 15 ? 'd-mal' : ''}">${signo(p.desvioPct, '%')}</span>${n > 1 ? `<span class="tenue bloque">${porc(p.coberturaReal)} de las semanas</span>` : ''}`) },
     { key: 'alertas', label: 'Alertas', alinear: 'num', sort: (p) => (alertasPorPersona.get(p.persona) || []).length,
       render: (p) => { const as = alertasPorPersona.get(p.persona) || []; const c = as.filter((a) => a.nivel === 'critica').length;
         return as.length ? `${as.length}${c ? ` <span class="badge n-critica">${c} crít.</span>` : ''}` : '<span class="tenue">0</span>'; } },
   ];
   // con el detalle abierto, la tabla del equipo queda como índice: menos columnas
-  const visibles = sel ? columnas.filter((c) => ['persona', 'horas', 'ocupacion', 'alertas'].includes(c.key)) : columnas;
+  const visibles = sel ? columnas.filter((c) => ['persona', 'horas', 'realSemana', 'alertas'].includes(c.key)) : columnas;
   tabla(el.querySelector('[data-tabla]'), {
     rows: stats, orden: { key: 'horas', dir: -1 },
     onRow: (p) => app.ir('personas', p.persona === sel ? {} : { persona: p.persona }),
     cols: visibles,
   });
-  if (!sel) el.querySelector('[data-tabla]').insertAdjacentHTML('beforeend', '<p class="nota">Desvío: horas reales frente a planificadas, sobre las actividades que tienen horas reales cargadas.</p>');
+  if (!sel) el.querySelector('[data-tabla]').insertAdjacentHTML('beforeend', `<p class="nota">${n === 1 ? 'Horas reales: un total por persona para la semana; se guarda al salir del casillero y el Excel no lo modifica. ' : ''}Desvío: horas reales frente a las planificadas.</p>`);
+  el.querySelectorAll('[data-tabla] .in-real').forEach((inp) => inp.addEventListener('change', async () => {
+    const v = inp.value === '' ? null : Number(inp.value);
+    if (v !== null && (isNaN(v) || v < 0 || v > 120)) { inp.classList.add('invalido'); return; }
+    inp.disabled = true;
+    try {
+      await db.guardarHorasReales(app.semana.id, inp.dataset.persona, v);
+      const k = `${app.semana.inicio}|${inp.dataset.persona}`;
+      if (v === null) CTX.reales.delete(k); else CTX.reales.set(k, v);
+      aviso('Horas reales guardadas.');
+      render(el, app);
+    } catch (e) { aviso(e.message, 'error'); inp.disabled = false; }
+  }));
 
   if (sel) await detalle(el.querySelector('[data-detalle]'), app, sel, { stats: stats.find((p) => p.persona === sel), alertas: alertasPorPersona.get(sel) || [], n, rows });
 }
@@ -79,7 +94,7 @@ async function detalle(cont, app, persona, { stats: p, alertas: als, n }) {
     </header>
     <dl class="cifras">
       <div><dt>Horas${n > 1 ? ' / sem.' : ''}</dt><dd>${horas(p.horas)}</dd></div>
-      <div><dt>Ocupación</dt><dd>${porc(p.ocupacion)}</dd></div>
+      <div><dt>Ocupación</dt><dd>${porc(p.ocupacion)}</dd><dd class="tenue"><label>de <input class="in-jornada" type="number" min="1" max="80" step="1" value="${p.jornada}" data-jornada aria-label="Jornada semanal en horas"> h</label></dd></div>
       <div><dt>Cumplimiento</dt><dd>${p.cumplimiento === null ? '—' : porc(p.cumplimiento)}</dd></div>
       <div><dt>Desvío plan vs real</dt><dd>${p.desvioPct === null ? '—' : signo(p.desvioPct, '%')}</dd></div>
     </dl>
@@ -94,8 +109,7 @@ async function detalle(cont, app, persona, { stats: p, alertas: als, n }) {
       <div><h3>Horas por día${n > 1 ? ' (total del período)' : ''}</h3>${barrasDias(p.horasDia)}</div>
     </div>
 
-    <h3>Planificación de la semana y horas reales</h3>
-    <p class="nota">Cargá las horas reales para medir el desvío. Se guardan al salir de cada casillero y el Excel no las modifica.</p>
+    <h3>Planificación de la semana</h3>
     <div data-plan></div>
 
     ${cambios.length ? `<h3>Cambios después de la primera carga</h3><ul class="lista-simple">${cambios.slice(0, 15).map((c) => `<li><span class="tenue">${fechaHora(c.fechaHora)}</span> ${c.tipo === 'alta' ? 'Agregó' : c.tipo === 'retiro' ? 'Quitó' : c.tipo === 'reactivacion' ? 'Volvió a incluir' : `Cambió ${esc(c.campo?.replace('_planificadas', '').replace('_', ' '))} (${esc(c.antes ?? '—')} → ${esc(c.despues ?? '—')}) en`} "${esc(c.tarea)}"</li>`).join('')}</ul>` : ''}
@@ -108,6 +122,17 @@ async function detalle(cont, app, persona, { stats: p, alertas: als, n }) {
     ${recs.length ? `<h3>Recomendaciones</h3><ul class="recs">${recs.map((r) => `<li><span class="rec-motivo">${esc(r.motivo)}</span><p>${esc(r.texto)}</p></li>`).join('')}</ul>` : ''}`;
 
   cont.querySelector('[data-cerrar]').addEventListener('click', () => app.ir('personas'));
+  cont.querySelector('[data-jornada]').addEventListener('change', async (e) => {
+    const v = Number(e.target.value);
+    if (!(v > 0 && v <= 80)) { e.target.classList.add('invalido'); return; }
+    e.target.disabled = true;
+    try {
+      await db.guardarJornada(p.personaId, v);
+      app.actualizarPersona(p.personaId, { jornada: v });
+      aviso(`Jornada de ${persona}: ${v} h semanales.`);
+      render(cont.closest('#contenido'), app);
+    } catch (err) { aviso(err.message, 'error'); e.target.disabled = false; }
+  });
 
   const labels = sem8.map((s) => etiquetaSemana(s.inicio));
   const datos = sem8.map((s) => (porSem.get(s.inicio) || []).reduce((a, r) => a + (r.horas || 0), 0));
@@ -115,7 +140,7 @@ async function detalle(cont, app, persona, { stats: p, alertas: als, n }) {
     type: 'bar',
     data: { labels, datasets: [
       { label: 'Horas planificadas', data: datos, backgroundColor: sem8.map((s) => (s.id === app.semana.id ? PALETA.bluffs : PALETA.beige)), borderRadius: 3 },
-      { type: 'line', label: `Jornada (${CONFIG.jornada} h)`, data: labels.map(() => CONFIG.jornada), borderColor: PALETA.pewter, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+      { type: 'line', label: `Jornada (${num(p.jornada, 0)} h)`, data: labels.map(() => p.jornada), borderColor: PALETA.pewter, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
     ] },
     options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'horas' } }, x: { grid: { display: false } } } },
   });
@@ -128,12 +153,10 @@ async function detalle(cont, app, persona, { stats: p, alertas: als, n }) {
       { key: 'fecha', label: 'Fecha', clase: 'nw', sort: (r) => `${r.fecha || '9'}${String(r.fila).padStart(4, '0')}`, render: (r) => `${diaDe(r).slice(0, 3)} ${fechaCorta(r.fecha)}` },
       { key: 'tarea', label: 'Tarea', clase: 'col-tarea', render: (r) => esc(r.tarea) },
       { key: 'prioridad', label: 'Prioridad', render: (r) => prioBadge(r.prioridad) },
-      { key: 'horas', label: 'Plan', alinear: 'num', render: (r) => horas(r.horas) },
-      { key: 'real', label: 'Real', alinear: 'num', render: (r) => inputReal(r) },
+      { key: 'horas', label: 'Tiempo', alinear: 'num', render: (r) => horas(r.horas) },
       { key: 'estado', label: 'Estado', sort: (r) => estadoDe(r), render: (r) => esc(r.estado) || '<span class="tenue">—</span>' },
     ],
   });
-  conectarReales(planCont, app);
   // en pantallas angostas el detalle queda debajo de la tabla: llevar la vista hasta él
   if (matchMedia('(max-width: 1280px)').matches) cont.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
 }

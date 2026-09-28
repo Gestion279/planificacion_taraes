@@ -13,7 +13,7 @@ export const titulo = 'Carga';
 const OBS = {
   sin_fecha: 'Sin fecha', fecha_fuera_semana: 'Fecha fuera de la semana', dia_inconsistente: 'Día no coincide con la fecha',
   horas_invalidas: 'Tiempo no interpretable', prioridad_no_reconocida: 'Importancia no reconocida', posible_duplicado: 'Posible duplicado',
-  persona_ausente: 'Persona que no vino en el archivo', persona_otra_area: 'Persona de otra área', archivo_repetido: 'Archivo repetido',
+  persona_ausente: 'Persona que no vino en el archivo', persona_similar: 'Persona nueva con nombre parecido', persona_otra_area: 'Persona de otra área', archivo_repetido: 'Archivo repetido',
 };
 const CAMPOS = { fecha: 'fecha', dia: 'día', tarea: 'tarea', prioridad: 'prioridad', horas_planificadas: 'tiempo', recursos: 'recursos', riesgos: 'riesgos', estado: 'estado' };
 // Nombre de quien carga: preferencia de interfaz guardada en este navegador (no es un dato de negocio)
@@ -28,7 +28,10 @@ export async function render(el, app) {
   <header class="mod-cab"><h1>Carga</h1><p class="sub">Subí el Excel semanal de cada área, como hasta ahora.</p></header>
   <section class="panel">
     <header class="panel-cab"><h2>Importar planificación</h2>
-      <label class="inline">Cargado por<input data-cargado-por type="text" value="${esc(leerNombre())}" placeholder="Tu nombre (opcional)" autocomplete="name"></label></header>
+      <span class="unificar">
+        <label class="inline">Cargado por<input data-cargado-por type="text" value="${esc(leerNombre())}" placeholder="Tu nombre (opcional)" autocomplete="name"></label>
+        <span data-clave-cont></span>
+      </span></header>
     <label class="zona" data-zona>
       <input type="file" accept=".xlsx,.xls,.xlsm" multiple hidden data-archivo>
       <b>Arrastrá los archivos acá o hacé clic para elegirlos</b>
@@ -38,8 +41,13 @@ export async function render(el, app) {
   </section>
   <section class="panel"><header class="panel-cab"><h2>Historial de cargas</h2></header><div data-historial><p class="tenue">Cargando…</p></div></section>
   <details class="panel migracion">
+    <summary><h2>Unificar personas</h2><span class="tenue">Para errores de tipeo en el nombre</span></summary>
+    <p>Si una misma persona aparece con dos nombres (por ejemplo "David Toleado" y "David Toledo"), unificalas: todas sus actividades pasan a la persona correcta y las próximas cargas con el nombre mal escrito se corrigen solas.</p>
+    <div class="unificar" data-unificar><span class="tenue">Cargando personas…</span></div>
+  </details>
+  <details class="panel migracion">
     <summary><h2>Migrar el historial de los dashboards anteriores</h2><span class="tenue">Se usa una sola vez</span></summary>
-    <p>Elegí los archivos <b>Planificación Semanal</b> y <b>Histórico de Planificación</b> (HTML). Sus semanas pasan por la misma sincronización, así que se pueden migrar más de una vez sin duplicar.</p>
+    <p>Elegí los archivos <b>Planificación Semanal</b> y <b>Histórico de Planificación</b> (HTML). Solo quedan marcadas las semanas que todavía no están cargadas, para no pisar lo que se subió desde los Excel.</p>
     <input type="file" accept=".html,.htm" multiple data-legado>
     <div data-legado-res></div>
   </details>`;
@@ -53,7 +61,40 @@ export async function render(el, app) {
   input.addEventListener('change', () => { procesar([...input.files], el, app); input.value = ''; });
   el.querySelector('[data-legado]').addEventListener('change', (e) => migracion([...e.target.files], el.querySelector('[data-legado-res]'), app));
 
+  claveCampo(el.querySelector('[data-clave-cont]'));
+  unificar(el.querySelector('[data-unificar]'), app);
   await historial(el.querySelector('[data-historial]'));
+}
+
+async function claveCampo(cont) {
+  if (!(await db.claveRequerida())) return;
+  let guardada = ''; try { guardada = localStorage.getItem('planif.clave') || ''; } catch { /* opcional */ }
+  cont.innerHTML = `<label class="inline">Clave de carga<input type="password" data-clave value="${esc(guardada)}" autocomplete="current-password" size="12"></label>`;
+  cont.querySelector('[data-clave]').addEventListener('change', (e) => db.guardarClave(e.target.value.trim()));
+}
+
+async function unificar(cont, app) {
+  try {
+    const ps = await db.personas();
+    const opts = ps.map((p) => `<option value="${p.id}">${esc(p.nombre)}${p.area ? ` (${esc(p.area)})` : ''}</option>`).join('');
+    cont.innerHTML = `
+      <label>Nombre incorrecto<select data-origen><option value="">Elegí…</option>${opts}</select></label>
+      <label>Persona correcta<select data-destino><option value="">Elegí…</option>${opts}</select></label>
+      <button class="btn" data-unir>Unificar</button>`;
+    cont.querySelector('[data-unir]').addEventListener('click', async (e) => {
+      const o = cont.querySelector('[data-origen]').value, d = cont.querySelector('[data-destino]').value;
+      if (!o || !d || o === d) { aviso('Elegí dos personas distintas.', 'error'); return; }
+      const no = ps.find((p) => p.id === o).nombre, nd = ps.find((p) => p.id === d).nombre;
+      if (!confirm(`Todas las actividades de "${no}" pasan a "${nd}" y "${no}" deja de existir. ¿Continuar?`)) return;
+      e.target.disabled = true;
+      try {
+        const r = await db.unificarPersonas(o, d);
+        aviso(`Listo: ${r.actividades} actividades de ${r.origen} pasaron a ${r.destino}.`);
+        await app.refrescar();
+        unificar(cont, app);
+      } catch (err) { aviso(err.message, 'error'); e.target.disabled = false; }
+    });
+  } catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
 }
 
 // ---------------------------------------------------------------------
@@ -183,34 +224,40 @@ async function migracion(files, cont, app) {
   }
   const cargas = unirCargas(listas);
   if (!cargas.length) { cont.innerHTML = `<p class="error">${esc(errores.join(' ') || 'No se encontraron datos para migrar.')}</p>`; return; }
-  const estado = new Map(cargas.map((c) => [c, { previa: null, ok: null, error: null }]));
+  // semanas + área que ya existen: se destildan para no pisar lo cargado desde los Excel
+  const existentes = new Set((await db.importaciones(1000)).map((i) => `${i.semana}|${i.area}`));
+  const estado = new Map(cargas.map((c) => [c, { previa: null, ok: null, error: null, existe: existentes.has(`${c.semana}|${c.area}`), sel: !existentes.has(`${c.semana}|${c.area}`) }]));
 
+  const elegidas = () => cargas.filter((c) => estado.get(c).sel);
   const pintar = (enCurso = '') => {
     const hechas = [...estado.values()].filter((s) => s.ok).length;
     cont.innerHTML = `
       ${errores.map((e) => `<p class="aviso-linea">${esc(e)}</p>`).join('')}
       <p>${cargas.length} cargas encontradas (${num(cargas.reduce((a, c) => a + c.filas.length, 0), 0)} actividades) en ${new Set(cargas.map((c) => c.semana)).size} semanas.</p>
-      <div class="tabla-scroll"><table class="tabla compacta"><thead><tr><th>Semana</th><th>Área</th><th class="num">Actividades</th><th class="num">Nuevas</th><th class="num">Modificadas</th><th class="num">Sin cambios</th><th class="num">Observ.</th><th>Estado</th></tr></thead>
+      <div class="tabla-scroll"><table class="tabla compacta"><thead><tr><th></th><th>Semana</th><th>Área</th><th class="num">Actividades</th><th class="num">Nuevas</th><th class="num">Modificadas</th><th class="num">Sin cambios</th><th class="num">Observ.</th><th>Estado</th></tr></thead>
       <tbody>${cargas.map((c) => { const s = estado.get(c); const r = s.ok || s.previa;
-        return `<tr><td>${rangoSemana(c.semana, addDays(c.semana, 6))}</td><td>${esc(c.area)}</td><td class="num">${c.filas.length}</td>
+        return `<tr><td><input type="checkbox" class="migrar-sel" data-i="${cargas.indexOf(c)}" ${s.sel ? 'checked' : ''} ${s.ok || enCurso ? 'disabled' : ''} aria-label="Migrar esta semana"></td><td>${rangoSemana(c.semana, addDays(c.semana, 6))}${s.existe ? ' <span class="tenue">(ya cargada)</span>' : ''}</td><td>${esc(c.area)}</td><td class="num">${c.filas.length}</td>
           <td class="num">${r ? r.nuevas : ''}</td><td class="num">${r ? r.modificadas : ''}</td><td class="num">${r ? r.sin_cambios : ''}</td><td class="num">${r ? r.observaciones.length : ''}</td>
-          <td>${s.error ? `<span class="error">${esc(s.error)}</span>` : s.ok ? '<span class="ok-txt">Migrada</span>' : s.previa ? 'Lista' : ''}</td></tr>`; }).join('')}</tbody></table></div>
+          <td>${s.error ? `<span class="error">${esc(s.error)}</span>` : s.ok ? '<span class="ok-txt">Migrada</span>' : s.previa ? 'Lista' : s.sel ? '' : '<span class="tenue">No se migra</span>'}</td></tr>`; }).join('')}</tbody></table></div>
       <div class="acciones">
-        ${enCurso ? `<p class="tenue">${esc(enCurso)}</p>` : hechas === cargas.length ? '<p class="ok-txt">Migración completa.</p>'
-          : [...estado.values()].every((s) => s.previa || s.error) ? '<button class="btn primario" data-migrar>Confirmar migración</button>'
+        ${enCurso ? `<p class="tenue">${esc(enCurso)}</p>` : !elegidas().length ? '<p class="tenue">No hay semanas elegidas para migrar.</p>'
+          : elegidas().every((c) => estado.get(c).ok) ? `<p class="ok-txt">Migración completa (${hechas} ${hechas === 1 ? 'carga' : 'cargas'}).</p>`
+          : elegidas().every((c) => estado.get(c).previa || estado.get(c).error) ? '<button class="btn primario" data-migrar>Confirmar migración</button>'
             : '<button class="btn" data-previa>Ver qué va a cambiar</button>'}
       </div>`;
+    cont.querySelectorAll('.migrar-sel').forEach((cb) => cb.addEventListener('change', () => { estado.get(cargas[+cb.dataset.i]).sel = cb.checked; pintar(); }));
     cont.querySelector('[data-previa]')?.addEventListener('click', () => correr(false));
     cont.querySelector('[data-migrar]')?.addEventListener('click', () => correr(true));
   };
 
   const correr = async (confirmar) => {
     let i = 0;
-    for (const c of cargas) {
+    const lista = elegidas();
+    for (const c of lista) {
       i++;
       const s = estado.get(c);
       if (s.ok || (confirmar && s.error)) continue;
-      pintar(`${confirmar ? 'Guardando' : 'Comparando'} ${i} de ${cargas.length}: semana del ${etiquetaSemana(c.semana)}, ${c.area}…`);
+      pintar(`${confirmar ? 'Guardando' : 'Comparando'} ${i} de ${lista.length}: semana del ${etiquetaSemana(c.semana)}, ${c.area}…`);
       try {
         const res = await db.sincronizar(armarPayload({ archivo: c.archivo, hash: null, area: c.area, semana: c.semana, filas: c.filas, origen: 'migracion', cargadoPor: cargadoPor() }), confirmar);
         if (confirmar) s.ok = res; else s.previa = res;
