@@ -105,7 +105,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: -0.01em; }
 .grid-2.compacto { gap: 20px; }
 .grid-plan { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px; }
 .grid-plan > .panel { margin-bottom: 16px; }
-.grid-riesgos { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.grid-riesgos { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
 .vacio { color: var(--tinta-3); margin: 6px 0; }
 .nota { font-size: 12px; color: var(--tinta-3); margin: 8px 0 0; }
 .intro { color: var(--tinta-2); margin: 0 0 14px; max-width: 80ch; }
@@ -253,11 +253,12 @@ select:hover, input:hover { border-color: var(--beige); }
 
 /* matriz de riesgo */
 .matriz-riesgo { border-collapse: separate; border-spacing: 3px; width: 100%; font-size: 12.5px; table-layout: fixed; }
-.matriz-riesgo th:first-child { width: 78px; text-align: right; }
+.matriz-riesgo th:first-child { width: 66px; text-align: right; }
+.matriz-riesgo thead th { font-size: 11.5px; }
 .matriz-riesgo th { font-weight: 500; color: var(--tinta-2); text-transform: capitalize; padding: 3px; }
 .matriz-riesgo td { height: 56px; text-align: center; font-size: 20px; font-weight: 700; border-radius: 4px; }
 .mr.r-bajo { background: var(--ok-f); } .mr.r-moderado { background: var(--warn-f); } .mr.r-alto { background: #F3E1CF; } .mr.r-critico { background: var(--crit-f); }
-.sel-riesgo { min-height: 30px; padding: 3px 6px; font-size: 13px; }
+.sel-riesgo { min-height: 30px; padding: 3px 4px; font-size: 13px; width: 94px; }
 
 /* ---------------- personas ---------------- */
 .personas-layout.con-detalle { display: grid; grid-template-columns: minmax(340px, .8fr) minmax(0, 1.2fr); gap: 16px; align-items: start; }
@@ -379,3 +380,24 @@ s { color: var(--tinta-3); }
   .filtros select { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------------- diálogo de clave y edición en tablas ---------------- */
+.dlg-clave { border: 1px solid var(--linea-f); border-radius: 10px; padding: 22px; width: min(380px, 92vw); }
+.dlg-clave::backdrop { background: rgba(43, 52, 54, .4); }
+.dlg-clave h2 { font-size: 17px; margin-bottom: 8px; }
+.dlg-clave p { color: var(--tinta-2); margin: 0 0 12px; }
+.dlg-clave label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tinta-2); }
+.in-real { width: 74px; text-align: right; min-height: 30px; padding: 3px 6px; }
+.in-jornada { width: 70px; text-align: right; }
+.btn-mini { font: 600 12px var(--fuente); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--linea-f); background: #fff; color: var(--tinta-2); cursor: pointer; white-space: nowrap; }
+.btn-mini:hover { border-color: var(--pewter); color: var(--tinta); }
+.migrar-sel { width: 16px; height: 16px; }
+.unificar { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+.unificar label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--tinta-2); font-weight: 500; }
+.faltan { color: var(--tinta-2); }
+.cifras dd.tenue { font-size: 12.5px; font-weight: 400; margin-top: 2px; }
+.cifras dd.tenue label { display: inline-flex; align-items: center; gap: 4px; color: var(--tinta-2); }
+.cifras .in-jornada { min-height: 26px; padding: 2px 6px; font-size: 13px; width: 58px; }
+.revisadas { margin-top: 12px; }
+.revisadas summary { cursor: pointer; font-weight: 600; color: var(--tinta-2); padding: 4px 0; }
+.col-riesgo { min-width: 180px; max-width: 300px; }
