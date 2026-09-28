@@ -609,7 +609,7 @@ export function recomendaciones({ rows, rangeRows = [], persona = null }) {
   const rec = recurrentesPeriodo(rangeBase).filter((t) => AUTOMATIZABLE.has(t.categoria) && t.horasSemana >= 1).slice(0, 2);
   for (const t of rec)
     out.push({ texto: `Estandarizar o automatizar "${recortar(t.tarea, 70)}": aparece en ${t.semanas} semanas y consume ${round1(t.horasSemana)} h por semana${t.personas.length > 1 ? ` entre ${t.personas.length} personas` : ''}.`,
-      motivo: 'Tareas recurrentes', modulo: 'evolucion' });
+      motivo: 'Tareas recurrentes', modulo: 'mejoras' });
 
   const pers = riesgosPersistentes(rangeBase).filter((x) => x.semanas >= 3).slice(0, 1);
   for (const x of pers)
