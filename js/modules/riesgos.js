@@ -7,12 +7,13 @@
 // =====================================================================
 import * as db from '../db.js';
 import { alertas, auditoria, REGLAS_ALERTA, NIVELES_RIESGO, nivelRiesgo, tieneRiesgo, norm, groupBy, diaDe, CTX, claveRiesgo, claveExcepcion } from '../engine.js';
-import { esc, num, porc, tabla, nivelBadge, riesgoBadge, opciones, aviso, fechaCorta, rangoSemana, prioBadge } from '../ui.js';
+import { esc, num, porc, tabla, nivelBadge, riesgoBadge, opciones, aviso, fechaCorta, rangoSemana, prioBadge, multiSelect } from '../ui.js';
 import { abrirDetalle } from '../detalle.js';
 
 export const titulo = 'Riesgos y auditoría';
 const TABS = [['riesgos', 'Riesgos declarados'], ['alertas', 'Alertas del sistema'], ['auditoria', 'Auditoría de datos']];
-const FR = { persona: '', area: '', nivel: '' };
+// Filtro propio de la hoja (Área y Persona son globales, en la barra superior)
+let FR = { nivel: [] };
 
 export async function render(el, app) {
   const tab = TABS.some(([k]) => k === app.params.tab) ? app.params.tab : 'riesgos';
@@ -48,23 +49,18 @@ async function riesgosDeclarados(c, app) {
       semanas: semanasPorRiesgo.get(kp)?.size || 1, prioAlta: rs.some((r) => r.prioridad === 'Alta') };
   });
 
-  const personas = [...new Set(grupos.map((g) => g.persona))].sort();
-  const areas = [...new Set(grupos.map((g) => g.area))].sort();
+  FR = app.filtrosHoja('riesgos', { nivel: [] });
+  app.registrarLimpieza('riesgos', () => { FR.nivel = []; }, () => FR.nivel.length);
   c.innerHTML = `
     <p class="intro">Riesgos escritos por cada persona en la columna <b>Riesgos</b> del Excel. Asigná probabilidad e impacto para obtener el nivel. La evaluación queda guardada para esa persona y ese riesgo, y se aplica sola en las semanas en que lo vuelva a declarar.</p>
-    <form class="filtros">
-      <label>Persona<select name="persona">${opciones(personas, FR.persona, 'Todas')}</select></label>
-      <label>Área<select name="area">${opciones(areas, FR.area, 'Todas')}</select></label>
-      <label>Nivel<select name="nivel">${opciones([['crítico', 'Crítico'], ['alto', 'Alto'], ['moderado', 'Moderado'], ['bajo', 'Bajo'], ['sin', 'Sin evaluar']], FR.nivel, 'Todos')}</select></label>
-    </form>
+    <form class="filtros" onsubmit="return false"><span data-ms="nivel"></span></form>
     <div class="grid-riesgos">
       <section class="panel"><header class="panel-cab"><h2>Riesgos de la semana</h2><span class="tenue" data-cuenta></span></header><div data-tabla></div></section>
       <section class="panel"><header class="panel-cab"><h2>Matriz de riesgo</h2></header><div data-matriz></div></section>
     </div>`;
 
   const aplicar = () => {
-    const vis = grupos.filter((g) => (!FR.persona || g.persona === FR.persona) && (!FR.area || g.area === FR.area) &&
-      (!FR.nivel || (FR.nivel === 'sin' ? !g.nivel : g.nivel === FR.nivel)));
+    const vis = grupos.filter((g) => !FR.nivel.length || FR.nivel.includes(g.nivel || 'sin'));
     c.querySelector('[data-cuenta]').textContent = `${vis.length} riesgos en ${num(vis.reduce((a, g) => a + g.rows.length, 0), 0)} actividades, ${vis.filter((g) => !g.nivel).length} sin evaluar`;
     tabla(c.querySelector('[data-tabla]'), {
       rows: vis, orden: { key: 'semanas', dir: -1 }, vacio: 'No hay riesgos declarados con estos filtros.',
@@ -81,7 +77,9 @@ async function riesgosDeclarados(c, app) {
     c.querySelectorAll('select[data-g]').forEach((s) => s.addEventListener('change', () => guardar(s, grupos, app, aplicar)));
     matriz(c.querySelector('[data-matriz]'), vis);
   };
-  c.querySelector('.filtros').addEventListener('input', (e) => { FR[e.target.name] = e.target.value; aplicar(); });
+  c.querySelector('[data-ms="nivel"]').replaceWith(multiSelect({ etiqueta: 'Nivel', todos: 'Todos',
+    opciones: [['crítico', 'Crítico'], ['alto', 'Alto'], ['moderado', 'Moderado'], ['bajo', 'Bajo'], ['sin', 'Sin evaluar']].map(([valor, texto]) => ({ valor, texto })),
+    seleccion: FR.nivel, onChange: (v) => { FR.nivel = v; aplicar(); app.refrescarContadorFiltros(); } }));
   aplicar();
 }
 

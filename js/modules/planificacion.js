@@ -3,17 +3,21 @@
 // Integra carga (persona × día), prioridades, estado y tareas repetitivas.
 // =====================================================================
 import { DIAS, PRIORIDADES, ESTADOS, diaDe, prioridadDe, estadoDe, repetitivasSemana, claveTarea, norm, CONFIG } from '../engine.js';
-import { esc, num, horas, tabla, barraApilada, prioBadge, opciones, COLOR_PRIORIDAD, COLOR_ESTADO, fechaCorta, rangoSemana, barraOcupacion } from '../ui.js';
+import { esc, num, horas, tabla, barraApilada, prioBadge, multiSelect, COLOR_PRIORIDAD, COLOR_ESTADO, fechaCorta, rangoSemana, barraOcupacion } from '../ui.js';
 import { abrirDetalle } from '../detalle.js';
 
 export const titulo = 'Planificación';
-const F = { persona: '', area: '', dia: '', prioridad: '', estado: '', texto: '' };
+// Filtros propios de la hoja (Área y Persona son globales, en la barra superior)
+let F = { dia: [], prioridad: [], estado: [], texto: '' };
+const limpiarPropios = () => { F.dia = []; F.prioridad = []; F.estado = []; F.texto = ''; };
+const cuentaPropios = () => F.dia.length + F.prioridad.length + F.estado.length + (F.texto ? 1 : 0);
 
 export async function render(el, app) {
-  if (app.params.persona) F.persona = app.params.persona;
+  F = app.filtrosHoja('planificacion', { dia: [], prioridad: [], estado: [], texto: '' });
+  app.registrarLimpieza('planificacion', limpiarPropios, cuentaPropios);
+  // "Ver en Planificación" desde otra hoja: se aplica como filtro global de persona
+  if (app.params.persona) { const p = app.params.persona; history.replaceState(null, '', '#/planificacion'); await app.fijarFiltros({ personas: [p] }, { redibujar: false }); }
   const todas = app.filas;
-  const personas = [...new Set(todas.map((r) => r.persona))].sort((a, b) => a.localeCompare(b, 'es'));
-  const areas = [...new Set(todas.map((r) => r.area))].sort();
   const diasPresentes = DIAS.filter((d) => todas.some((r) => diaDe(r) === d));
 
   const repetidas = new Set(repetitivasSemana(todas).map((x) => `${x.persona}|${x.clave}`));
@@ -24,14 +28,9 @@ export async function render(el, app) {
     <h1>Planificación</h1>
     <p class="sub">${rangoSemana(app.semana.inicio, app.semana.fin)}</p>
   </header>
-  <form class="filtros" aria-label="Filtros">
-    <label>Persona<select name="persona">${opciones(personas, F.persona, 'Todas')}</select></label>
-    <label>Área<select name="area">${opciones(areas, F.area, 'Todas')}</select></label>
-    <label>Día<select name="dia">${opciones(diasPresentes, F.dia, 'Todos')}</select></label>
-    <label>Prioridad<select name="prioridad">${opciones(PRIORIDADES, F.prioridad, 'Todas')}</select></label>
-    <label>Estado<select name="estado">${opciones(ESTADOS, F.estado, 'Todos')}</select></label>
+  <form class="filtros" aria-label="Filtros de la hoja" onsubmit="return false">
+    <span data-ms="dia"></span><span data-ms="prioridad"></span><span data-ms="estado"></span>
     <label class="crece">Buscar<input name="texto" type="search" value="${esc(F.texto)}" placeholder="Tarea, recurso o riesgo"></label>
-    <button type="button" class="btn texto" data-limpiar>Limpiar</button>
   </form>
   <div class="grid-plan">
     <section class="panel"><header class="panel-cab"><h2>Carga por persona y día</h2><span class="tenue" data-cuenta></span></header><div data-matriz></div></section>
@@ -47,9 +46,8 @@ export async function render(el, app) {
   const aplicar = () => {
     const t = norm(F.texto);
     const rows = todas.filter((r) =>
-      (!F.persona || r.persona === F.persona) && (!F.area || r.area === F.area) && (!F.dia || diaDe(r) === F.dia) &&
-      (!F.prioridad || prioridadDe(r) === F.prioridad) && (!F.estado || estadoDe(r) === F.estado) &&
-      (!t || norm(`${r.tarea} ${r.recursos} ${r.riesgos}`).includes(t)));
+      (!F.dia.length || F.dia.includes(diaDe(r))) && (!F.prioridad.length || F.prioridad.includes(prioridadDe(r))) &&
+      (!F.estado.length || F.estado.includes(estadoDe(r))) && (!t || norm(`${r.tarea} ${r.recursos} ${r.riesgos}`).includes(t)));
     el.querySelector('[data-cuenta]').textContent = `${num(rows.length, 0)} de ${num(todas.length, 0)} actividades`;
     pintarMatriz(el.querySelector('[data-matriz]'), rows, app);
     const hPrio = PRIORIDADES.map((p) => ({ label: p, valor: rows.filter((r) => prioridadDe(r) === p).reduce((a, r) => a + (r.horas || 0), 0), color: COLOR_PRIORIDAD[p] }));
@@ -77,12 +75,12 @@ export async function render(el, app) {
     });
   };
 
-  form.addEventListener('input', (e) => { if (e.target.name) { F[e.target.name] = e.target.value; aplicar(); } });
-  form.querySelector('[data-limpiar]').addEventListener('click', () => {
-    Object.keys(F).forEach((k) => { F[k] = ''; }); form.reset();
-    form.querySelectorAll('select').forEach((s) => { s.value = ''; });
-    if (app.params.persona) app.ir('planificacion'); else aplicar();
-  });
+  const alCambiar = (campo) => (v) => { F[campo] = v; aplicar(); app.refrescarContadorFiltros(); };
+  const op = (vals) => vals.map((v) => ({ valor: v, texto: v }));
+  form.querySelector('[data-ms="dia"]').replaceWith(multiSelect({ etiqueta: 'Día', opciones: op(diasPresentes), seleccion: F.dia, todos: 'Todos', onChange: alCambiar('dia') }));
+  form.querySelector('[data-ms="prioridad"]').replaceWith(multiSelect({ etiqueta: 'Prioridad', opciones: op(PRIORIDADES), seleccion: F.prioridad, todos: 'Todas', onChange: alCambiar('prioridad') }));
+  form.querySelector('[data-ms="estado"]').replaceWith(multiSelect({ etiqueta: 'Estado', opciones: op(ESTADOS), seleccion: F.estado, todos: 'Todos', onChange: alCambiar('estado') }));
+  form.querySelector('[name="texto"]').addEventListener('input', (e) => { F.texto = e.target.value; aplicar(); app.refrescarContadorFiltros(); });
   aplicar();
 }
 
