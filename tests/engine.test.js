@@ -91,3 +91,50 @@ test('cumplimiento de carga: semanas con planificación sobre el total y semáfo
   assert.equal(nivelSemaforo(0), 'rojo'); assert.equal(nivelSemaforo(24.9), 'rojo');
   assert.equal(nivelSemaforo(50), 'amarillo'); assert.equal(nivelSemaforo(74.9), 'amarillo'); assert.equal(nivelSemaforo(75), 'verde');
 });
+
+test('propuestas de mejora: clasificación, automatización y herramienta', () => {
+  assert.equal(E.clasificar('Actualizar planilla de stock'), 'Documentación');
+  assert.equal(E.clasificar('Tarea sin palabras clave'), 'Operativa');
+  assert.equal(E.clasificar('Tarea sin palabras clave', true), 'Repetitiva');
+  assert.equal(E.automatizacion('Definir estrategia comercial', 'Estratégica').nivel, 'Nulo');
+  assert.equal(E.automatizacion('Copiar datos a la planilla', 'Operativa').score, 90);
+  assert.equal(E.herramientaPara('Armar reporte mensual', 'Analítica'), 'Power BI');
+});
+
+test('propuestas de mejora: horas por semana, recuperables y tareas entre personas', () => {
+  const base = { area: 'Gestión', jornada: 44, fecha: '2026-07-06' };
+  const rows = [
+    { ...base, semana: '2026-07-06', persona: 'Ana', tarea: 'Pago a proveedores', horas: 4 },
+    { ...base, semana: '2026-07-13', persona: 'Ana', tarea: 'Pago a proveedores', horas: 4 },
+    { ...base, semana: '2026-07-06', persona: 'Beto', tarea: 'pago de proveedores', horas: 2 },
+    { ...base, semana: '2026-07-06', persona: 'Beto', tarea: 'Definir estrategia anual', horas: 6 },
+  ];
+  const a = E.analisisMejoras(rows, 2);
+  const pago = a.unicas.find((t) => t.categoria === 'Administrativa');
+  assert.equal(pago.horasSemana, 5);                     // (4 + 4 + 2) / 2 semanas
+  assert.deepEqual(pago.personas.sort(), ['Ana', 'Beto']);
+  assert.ok(a.recuperableSemana > 0);
+  assert.equal(a.entrePersonas[0].personas.length, 2);
+  assert.ok(a.indice >= 0 && a.indice <= 100);
+});
+
+test('tareas repetitivas: misma tarea más de una vez por persona en el período', () => {
+  const base = { area: 'Gestión', jornada: 44 };
+  const r = E.tareasRepetitivas([
+    { ...base, semana: '2026-07-06', persona: 'Ana', tarea: 'Control de caja', horas: 1 },
+    { ...base, semana: '2026-07-06', persona: 'Ana', tarea: 'Control de caja', horas: 1 },
+    { ...base, semana: '2026-07-13', persona: 'Ana', tarea: 'Control de caja', horas: null },
+    { ...base, semana: '2026-07-06', persona: 'Ana', tarea: 'Reunión única', horas: 2 },
+    { ...base, semana: '2026-07-06', persona: 'Beto', tarea: 'Viaje', horas: 8 },
+    { ...base, semana: '2026-07-06', persona: 'Beto', tarea: 'Informe semanal', horas: 1 },
+    { ...base, semana: '2026-07-13', persona: 'Beto', tarea: 'Informe semanal', horas: 1 }, // 1 vez por semana: no es repetitiva
+  ]);
+  assert.equal(r.personas, 2);
+  assert.equal(r.personasConRepetitivas, 1);
+  const ana = r.porPersona.find((p) => p.persona === 'Ana');
+  assert.equal(ana.tareas.length, 1);
+  assert.equal(ana.tareas[0].veces, 3);
+  assert.equal(ana.tareas[0].semanas, 2);
+  assert.equal(ana.tareas[0].horas, 2);
+  assert.equal(ana.tareas[0].horasPorVez, 1);           // promedio sobre las que tienen horas
+});
