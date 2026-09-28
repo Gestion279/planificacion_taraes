@@ -35,14 +35,20 @@
         <label class="sem-sel"><span class="sr">Semana</span><select id="semana"></select></label>
         <button id="sem-next" class="sem-flecha" type="button" aria-label="Semana siguiente">›</button>
       </div>
+      <div class="filtros-barra" role="group" aria-label="Filtros de todas las hojas">
+        <div id="filtros-globales" class="filtros-globales"></div>
+        <button id="limpiar-filtros" class="btn-limpiar" type="button" disabled>Limpiar filtros</button>
+      </div>
     </header>
 
     <nav class="nav" aria-label="Módulos">
       <a data-mod="resumen" href="#/resumen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Resumen</span></a>
-      <a data-mod="planificacion" href="#/planificacion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>Planificación</span></a>
+      <a data-mod="planificacion" href="#/planificacion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="l-largo">Planificación</span><span class="l-corto">Plan</span></a>
       <a data-mod="personas" href="#/personas"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M1 21c0-4 3.5-7 8-7s8 3 8 7M17 3.5a4 4 0 0 1 0 8M23 21c0-3-2-5.5-5-6.5"/></svg><span>Personas</span></a>
       <a data-mod="riesgos" href="#/riesgos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01"/></svg><span class="l-largo">Riesgos y auditoría</span><span class="l-corto">Riesgos</span></a>
       <a data-mod="evolucion" href="#/evolucion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>Evolución</span></a>
+      <a data-mod="mejoras" href="#/mejoras"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span class="l-largo">Propuestas de mejora</span><span class="l-corto">Mejoras</span></a>
+      <a data-mod="repetitivas" href="#/repetitivas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg><span class="l-largo">Tareas repetitivas</span><span class="l-corto">Repetidas</span></a>
       <a data-mod="carga" href="#/carga"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M4 15v5h16v-5"/></svg><span>Carga</span></a>
     </nav>
 

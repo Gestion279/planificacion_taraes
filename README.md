@@ -55,6 +55,8 @@ La clave de `SUPABASE_ANON_KEY` es la **pública** (publishable) y está pensada
 
 ## Uso semanal
 
+**Filtros.** En la barra superior, al lado de la semana, están los filtros de **Área** y **Persona** (se pueden elegir varias opciones). Se aplican a todas las hojas y se mantienen al navegar, al cambiar de semana y al recargar la página. Cada hoja puede tener además sus filtros propios (por ejemplo Día, Prioridad y Estado en Planificación, o Nivel en Riesgos), también de selección múltiple. **Limpiar filtros** deshace todas las selecciones juntas; el número indica cuántas hay activas.
+
 **Estado (columna H del Excel).** Para que el cumplimiento se pueda medir, usar solo estos cuatro valores: **Pendiente**, **En curso**, **Cumplida** y **Cancelada** (las canceladas no cuentan para el cumplimiento). Conviene fijarlos con una lista desplegable en la plantilla: seleccionar la columna H → *Datos → Validación de datos → Lista* → `Pendiente,En curso,Cumplida,Cancelada`. Cualquier otro texto aparece en Auditoría como *Estado no reconocido*.
 
 **Tiempo (columna E).** Se puede escribir en horas (`1,5`) o en formato hora (`1:30`). Si una celda tiene un valor de hora pero formato numérico (se ve `0,04` en lugar de `1:00`), la carga lo detecta, lo convierte a horas y lo avisa.
