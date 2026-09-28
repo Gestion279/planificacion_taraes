@@ -71,3 +71,23 @@ test('cobertura de carga detecta quién no cargó', () => {
   const c = E.coberturaCarga([fila()], previas);
   assert.deepEqual(c.faltan.map((f) => f.persona), ['Beto']);
 });
+
+test('cumplimiento de carga: semanas con planificación sobre el total y semáforo', async () => {
+  const { cumplimientoCarga, nivelSemaforo } = await import('../js/engine.js');
+  const semanas = ['2026-07-06', '2026-07-13', '2026-07-20', '2026-07-27'];
+  const reg = [
+    { semana: '2026-07-06', persona: 'Ana', area: 'Gestión' }, { semana: '2026-07-13', persona: 'Ana', area: 'Gestión' },
+    { semana: '2026-07-20', persona: 'Ana', area: 'Gestión' }, { semana: '2026-07-27', persona: 'Ana', area: 'Gestión' },
+    { semana: '2026-07-13', persona: 'Beto', area: 'Producción' },
+    { semana: '2026-08-03', persona: 'Beto', area: 'Producción' }, // fuera del rango: no cuenta
+  ];
+  const r = cumplimientoCarga(reg, semanas);
+  assert.deepEqual(r.semanas.map((s) => s.numero), [1, 2, 3, 4]);
+  const ana = r.personas.find((p) => p.persona === 'Ana');
+  const beto = r.personas.find((p) => p.persona === 'Beto');
+  assert.equal(ana.pct, 100); assert.equal(ana.nivel, 'verde');
+  assert.deepEqual(beto.marcas, [false, true, false, false]);
+  assert.equal(beto.pct, 25); assert.equal(beto.nivel, 'naranja');
+  assert.equal(nivelSemaforo(0), 'rojo'); assert.equal(nivelSemaforo(24.9), 'rojo');
+  assert.equal(nivelSemaforo(50), 'amarillo'); assert.equal(nivelSemaforo(74.9), 'amarillo'); assert.equal(nivelSemaforo(75), 'verde');
+});
