@@ -10,10 +10,9 @@ import * as personas from './modules/personas.js';
 import * as riesgos from './modules/riesgos.js';
 import * as evolucion from './modules/evolucion.js';
 import * as mejoras from './modules/mejoras.js';
-import * as repetitivas from './modules/repetitivas.js';
 import * as carga from './modules/carga.js';
 
-const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, mejoras, repetitivas, carga };
+const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, mejoras, carga };
 
 // ---------- estado compartido (una sola fuente de datos para todos los módulos) ----------
 export const app = {
