@@ -2,8 +2,9 @@
 // 📊 Resumen — vista ejecutiva de la semana seleccionada.
 // Es el lugar PRINCIPAL de los indicadores de semana.
 // =====================================================================
-import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy } from '../engine.js';
-import { esc, num, horas, porc, signo, rangoSemana, nivelBadge } from '../ui.js';
+import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy, cumplimientoCarga } from '../engine.js';
+import * as db from '../db.js';
+import { esc, num, horas, porc, signo, rangoSemana, nivelBadge, fechaCorta } from '../ui.js';
 
 export const titulo = 'Resumen';
 
@@ -63,6 +64,12 @@ export async function render(el, app) {
     <a class="kpi kpi-link ${k.alertasCriticas ? 'kpi-crit' : ''}" href="#/riesgos?tab=alertas"><span class="kpi-l">Alertas críticas</span><span class="kpi-v">${k.alertasCriticas}</span><span class="delta">${k.alertas.length} alertas en total</span></a>
   </section>
 
+  <section class="panel" aria-labelledby="carga-sem-t">
+    <header class="panel-cab"><h2 id="carga-sem-t">Planificación cargada por semana</h2>
+      <span class="leyenda-semaforo"><span class="sem-pill s-rojo">0–25%</span><span class="sem-pill s-naranja">25–50%</span><span class="sem-pill s-amarillo">50–75%</span><span class="sem-pill s-verde">75–100%</span></span></header>
+    <div data-carga-semanal><p class="tenue">Cargando…</p></div>
+  </section>
+
   <p class="situacion">${esc(situacion)}</p>
 
   <div class="grid-2">
@@ -91,4 +98,30 @@ export async function render(el, app) {
     <header class="panel-cab"><h2>Recomendaciones</h2></header>
     <ul class="recs">${recs.map((r) => `<li><span class="rec-motivo">${esc(r.motivo)}</span><p>${esc(r.texto)}</p><a href="#/${r.modulo}">Revisar</a></li>`).join('')}</ul>
   </section>` : ''}`;
+
+  await cuadroCargaSemanal(el.querySelector('[data-carga-semanal]'), app);
+}
+
+// Cuadro persona × semana: ✓ si esa semana tiene planificación, ✗ si no.
+// Semana 1 = primera semana registrada; llega hasta la semana seleccionada.
+async function cuadroCargaSemanal(cont, app) {
+  const hasta = app.semana.inicio;
+  const semanas = [...app.semanas].reverse().map((s) => s.inicio).filter((s) => s <= hasta);
+  let datos;
+  try { datos = cumplimientoCarga(await db.personaSemana(), semanas); }
+  catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  if (!datos.personas.length) { cont.innerHTML = '<p class="vacio">Sin datos.</p>'; return; }
+  const OK = '<svg class="ico-ok" viewBox="0 0 20 20" aria-label="Con planificación" role="img"><path d="M4 10.5l4 4 8-9"/></svg>';
+  const NO = '<svg class="ico-no" viewBox="0 0 20 20" aria-label="Sin planificación" role="img"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+  cont.innerHTML = `<div class="tabla-scroll"><table class="cuadro-carga">
+    <thead><tr><th scope="col" class="cc-persona">Persona</th>
+      ${datos.semanas.map((s) => `<th scope="col" class="${s.inicio === hasta ? 'cc-actual' : ''}" title="Semana ${s.numero}: del ${fechaCorta(s.inicio)}">${s.numero}<span>${fechaCorta(s.inicio)}</span></th>`).join('')}
+      <th scope="col" class="cc-pct">Cumplimiento<span>semanas con planificación</span></th></tr></thead>
+    <tbody>${datos.personas.map((p) => `<tr>
+      <th scope="row" class="cc-persona"><a href="#/personas?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
+      ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m ? OK : NO}</td>`).join('')}
+      <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <p class="nota">La semana 1 es la primera semana registrada (${fechaCorta(datos.semanas[0].inicio)}). El cumplimiento es la cantidad de semanas con planificación sobre el total de semanas${semanas.length < app.semanas.length ? ', hasta la semana seleccionada' : ''}.</p>`;
 }
