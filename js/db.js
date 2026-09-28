@@ -19,6 +19,32 @@ export async function iniciar() {
   return sb;
 }
 
+// ---------- clave de carga (opcional) ----------
+// Si en Supabase se definió una clave, las ediciones la piden una vez y queda en este navegador.
+export let alPedirClave = async () => null;
+export function configurarPedidoDeClave(fn) { alPedirClave = fn; }
+const leerClave = () => { try { return localStorage.getItem('planif.clave') || null; } catch { return null; } };
+export const guardarClave = (v) => { try { v ? localStorage.setItem('planif.clave', v) : localStorage.removeItem('planif.clave'); } catch { /* opcional */ } };
+const cargadoPor = () => { try { return localStorage.getItem('planif.cargadoPor') || null; } catch { return null; } };
+
+async function conClave(llamada) {
+  for (let intento = 0; intento < 3; intento++) {
+    const { data, error } = await llamada(leerClave());
+    if (!error) return data;
+    if (!/CLAVE_INVALIDA/.test(error.message)) throw new Error(error.message);
+    guardarClave(null);
+    const nueva = await alPedirClave(intento > 0);
+    if (!nueva) throw new Error('Se necesita la clave de carga para guardar cambios.');
+    guardarClave(nueva);
+  }
+  throw new Error('La clave de carga no es correcta.');
+}
+
+export async function claveRequerida() {
+  const { data, error } = await sb.rpc('clave_requerida');
+  return error ? false : !!data;
+}
+
 const n = (v) => (v === null || v === undefined ? null : Number(v));
 const mapActividad = (r) => ({
   id: r.id, semanaId: r.semana_id, semana: r.semana_inicio,
@@ -28,6 +54,7 @@ const mapActividad = (r) => ({
   recursos: r.recursos, riesgos: r.riesgos, estado: r.estado,
   riesgoProb: r.riesgo_prob, riesgoImpacto: r.riesgo_impacto,
   hoja: r.hoja, fila: r.fila_excel, altaPosterior: r.alta_posterior, updatedAt: r.updated_at,
+  jornada: n(r.jornada),
 });
 const mapCambio = (c) => ({
   id: c.id, fechaHora: c.created_at, tipo: c.tipo, campo: c.campo, antes: c.valor_anterior, despues: c.valor_nuevo,
@@ -35,16 +62,22 @@ const mapCambio = (c) => ({
   persona: c.persona, area: c.area, tarea: c.tarea, fecha: c.fecha,
 });
 
+// Trae todas las filas: la primera página informa el total y el resto se pide en paralelo
 async function todo(consulta) {
-  const pag = 1000; let desde = 0; const out = [];
-  for (;;) {
-    const { data, error } = await consulta().range(desde, desde + pag - 1);
-    if (error) throw new Error(error.message);
-    out.push(...data);
-    if (data.length < pag) return out;
-    desde += pag;
-  }
+  const pag = 1000;
+  const primera = await consulta({ count: 'exact' }).range(0, pag - 1);
+  if (primera.error) throw new Error(primera.error.message);
+  const total = primera.count ?? primera.data.length;
+  if (total <= pag) return primera.data;
+  const resto = await Promise.all(Array.from({ length: Math.ceil(total / pag) - 1 }, (_, i) =>
+    consulta().range((i + 1) * pag, (i + 2) * pag - 1)));
+  const err = resto.find((r) => r.error);
+  if (err) throw new Error(err.error.message);
+  return [primera.data, ...resto.map((r) => r.data)].flat();
 }
+
+// Para semanas que no son la seleccionada alcanza con las columnas de análisis (menos datos por la red)
+const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada';
 
 export async function semanas() {
   const { data, error } = await sb.from('v_semanas').select('*').gt('actividades', 0).order('fecha_inicio', { ascending: false });
@@ -58,15 +91,40 @@ export async function areas() {
   return data;
 }
 
-export async function actividades(semanaIds) {
+export async function actividades(semanaIds, { completas = true } = {}) {
   if (!semanaIds.length) return [];
-  const rows = await todo(() => sb.from('v_actividades').select('*').in('semana_id', semanaIds).order('id'));
+  const rows = await todo((opc) => sb.from('v_actividades').select(completas ? '*' : COLS_ANALISIS, opc).in('semana_id', semanaIds).order('id'));
   return rows.map(mapActividad);
+}
+
+export async function horasReales(semanaIds) {
+  if (!semanaIds.length) return [];
+  const { data, error } = await sb.from('horas_reales_semana').select('semana_id,persona_id,horas,semanas(fecha_inicio)').in('semana_id', semanaIds);
+  if (error) throw new Error(error.message);
+  return data.map((x) => ({ semana: x.semanas.fecha_inicio, personaId: x.persona_id, horas: Number(x.horas) }));
+}
+
+export async function riesgosEvaluados() {
+  const { data, error } = await sb.from('riesgos_evaluados').select('persona_id,riesgo_norm,prob,impacto');
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function excepcionesAuditoria() {
+  const { data, error } = await sb.from('auditoria_excepciones').select('persona_id,tarea_norm,regla');
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function personas() {
+  const { data, error } = await sb.from('personas').select('id,nombre,jornada_horas,areas(nombre)').order('nombre');
+  if (error) throw new Error(error.message);
+  return data.map((p) => ({ id: p.id, nombre: p.nombre, jornada: Number(p.jornada_horas), area: p.areas?.nombre || '' }));
 }
 
 export async function cambios(semanaIds) {
   if (!semanaIds.length) return [];
-  const rows = await todo(() => sb.from('v_cambios').select('*').in('semana_id', semanaIds).order('id'));
+  const rows = await todo((opc) => sb.from('v_cambios').select('*', opc).in('semana_id', semanaIds).order('id'));
   return rows.map(mapCambio);
 }
 
@@ -84,18 +142,30 @@ export async function importaciones(limite = 100) {
   return data.map((i) => ({ ...i, semana: i.semanas?.fecha_inicio, area: i.areas?.nombre }));
 }
 
-// Campos editables en la aplicación: horas_reales, riesgo_prob, riesgo_impacto
-export async function actualizarActividad(id, cambiosCampos) {
-  const permitido = {};
-  for (const [k, v] of Object.entries(cambiosCampos)) {
-    if (['horas_reales', 'riesgo_prob', 'riesgo_impacto'].includes(k)) permitido[k] = v === '' ? null : v;
-  }
-  const { error } = await sb.from('planificacion').update(permitido).eq('id', id);
-  if (error) throw new Error(error.message);
-}
+// ---------- ediciones (validan la clave si está definida) ----------
+export const guardarHorasReales = (semanaId, personaId, horas) => conClave((clave) =>
+  sb.rpc('guardar_horas_reales', { p_semana: semanaId, p_persona: personaId, p_horas: horas, p_clave: clave, p_cargado_por: cargadoPor() }));
 
+export const evaluarRiesgo = (personaId, riesgoNorm, riesgoTexto, prob, impacto) => conClave((clave) =>
+  sb.rpc('evaluar_riesgo', { p_persona: personaId, p_riesgo_norm: riesgoNorm, p_riesgo_texto: riesgoTexto,
+    p_prob: prob || null, p_impacto: impacto || null, p_clave: clave, p_cargado_por: cargadoPor() }));
+
+export const guardarJornada = (personaId, horas) => conClave((clave) =>
+  sb.rpc('guardar_jornada', { p_persona: personaId, p_horas: horas, p_clave: clave }));
+
+export const marcarRevisada = (personaId, tareaNorm, regla, revisada) => conClave((clave) =>
+  sb.rpc('marcar_revisada', { p_persona: personaId, p_tarea_norm: tareaNorm || '', p_regla: regla, p_revisada: revisada,
+    p_clave: clave, p_cargado_por: cargadoPor() }));
+
+export const unificarPersonas = (origenId, destinoId) => conClave((clave) =>
+  sb.rpc('unificar_personas', { p_origen: origenId, p_destino: destinoId, p_clave: clave }));
+
+// La vista previa es libre; la confirmación lleva la clave dentro del contenido
 export async function sincronizar(payload, confirmar) {
-  const { data, error } = await sb.rpc('sincronizar_planificacion', { p_payload: payload, p_confirmar: confirmar });
-  if (error) throw new Error(error.message);
-  return data;
+  if (!confirmar) {
+    const { data, error } = await sb.rpc('sincronizar_planificacion', { p_payload: payload, p_confirmar: false });
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  return conClave((clave) => sb.rpc('sincronizar_planificacion', { p_payload: { ...payload, clave }, p_confirmar: true }));
 }

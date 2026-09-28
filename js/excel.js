@@ -52,6 +52,22 @@ export function fechaISO(v) {
 
 const txt = (v) => (v === null || v === undefined ? '' : String(v).trim());
 
+// Tiempo de una celda. Excel guarda las horas como fracción de día (1 h = 0,041666…):
+//   · celda con formato de hora (h:mm)            → se convierte a horas
+//   · número con muchos decimales que es múltiplo exacto de 15 min en fracción de día
+//     (típico de copiar una hora a una celda numérica) → se convierte y se avisa
+//   · cualquier otro caso                         → el texto tal como se ve en la celda
+function tiempoDeCelda(ws, r, c, visible, XLSX) {
+  const cell = ws[XLSX.utils.encode_cell({ r, c })];
+  if (!cell || cell.t !== 'n' || !(cell.v > 0)) return { horas: visible, convertida: false };
+  const v = cell.v, fmt = String(cell.z || '');
+  const round2 = (x) => String(Math.round(x * 100) / 100);
+  if (/(^|[^a-z])\[?h+\]?[^a-z]*:?m|h:mm|\[h\]/i.test(fmt)) return { horas: round2(v * 24), convertida: false };
+  const cuartos = v * 96;
+  if (v < 1 && String(v).length > 6 && Math.abs(cuartos - Math.round(cuartos)) < 1e-6) return { horas: round2(v * 24), convertida: true };
+  return { horas: visible, convertida: false };
+}
+
 function leerHoja(ws, nombreHoja, XLSX) {
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
   const aoaRaw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
@@ -67,6 +83,7 @@ function leerHoja(ws, nombreHoja, XLSX) {
   }
 
   const filas = [];
+  let convertidas = 0;
   for (let r = inicio; r < aoa.length; r++) {
     const row = aoa[r] || [], raw = aoaRaw[r] || [];
     const g = (c) => txt(row[cols[c]]);
@@ -76,19 +93,22 @@ function leerHoja(ws, nombreHoja, XLSX) {
       hoja: nombreHoja, persona, fila: r + 1,
       fecha: fechaISO(raw[0] !== '' && raw[0] !== undefined ? raw[0] : row[0]) || fechaISO(row[0]),
       fecha_texto: f0,
-      dia: g('dia'), tarea: g('tarea'), prioridad: g('prioridad'), horas: g('horas'),
+      dia: g('dia'), tarea: g('tarea'), prioridad: g('prioridad'), horas: '',
       recursos: g('recursos'), riesgos: g('riesgos'), estado: g('estado'),
     };
+    const t = tiempoDeCelda(ws, r, cols.horas, g('horas'), XLSX);
+    fila.horas = t.horas;
     const contenido = [fila.tarea, fila.prioridad, fila.horas, fila.recursos, fila.riesgos, fila.estado].some((x) => x && x !== '-');
     if (!contenido) continue; // filas de plantilla vacías
+    if (t.convertida) convertidas++;
     filas.push(fila);
   }
-  return { hoja: nombreHoja, persona, filas, encabezadosDetectados: detectado };
+  return { hoja: nombreHoja, persona, filas, encabezadosDetectados: detectado, convertidas };
 }
 
 export async function leerArchivo(file, XLSX = globalThis.XLSX) {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true, cellNF: true }); // cellNF: conserva el formato para detectar horas
   const hojas = wb.SheetNames.map((n) => leerHoja(wb.Sheets[n], n, XLSX)).filter((h) => h && h.filas.length);
   const filas = hojas.flatMap((h) => h.filas);
   const advertencias = [];
@@ -97,6 +117,8 @@ export async function leerArchivo(file, XLSX = globalThis.XLSX) {
   if (!filas.length) advertencias.push('No se encontraron actividades. Verificá que cada hoja tenga la persona en B1 y las columnas Fecha a Estado.');
   const nombres = new Map();
   hojas.forEach((h) => { const k = key(h.persona); nombres.set(k, (nombres.get(k) || 0) + 1); });
+  hojas.filter((h) => h.convertidas).forEach((h) => advertencias.push(
+    `${h.persona}: ${h.convertidas} ${h.convertidas === 1 ? 'tiempo estaba guardado' : 'tiempos estaban guardados'} como hora de Excel (por ejemplo 0,0417 = 1 h) y se ${h.convertidas === 1 ? 'convirtió' : 'convirtieron'} a horas. Conviene revisar esa columna en el Excel.`));
   [...nombres].filter(([, n]) => n > 1).forEach(([k]) => advertencias.push(`La persona "${hojas.find((h) => key(h.persona) === k).persona}" aparece en más de una hoja; se unifican.`));
   return {
     archivo: file.name,

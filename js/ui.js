@@ -125,3 +125,24 @@ export function opciones(valores, sel, todos = null) {
   return (todos ? `<option value="">${esc(todos)}</option>` : '') +
     valores.map((v) => { const [val, lab] = Array.isArray(v) ? v : [v, v]; return `<option value="${esc(val)}" ${String(val) === String(sel) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
 }
+
+// ---------- clave de carga ----------
+// Se muestra solo si en Supabase se definió una clave y la acción la necesita.
+// Si ya hay un pedido abierto (dos acciones a la vez), se reutiliza el mismo diálogo.
+let pedidoEnCurso = null;
+export function pedirClave(reintento = false) {
+  if (pedidoEnCurso) return pedidoEnCurso;
+  pedidoEnCurso = new Promise((resolve) => {
+    const d = h(`<dialog class="dlg-clave" aria-labelledby="dlg-clave-t">
+      <form method="dialog">
+        <h2 id="dlg-clave-t">Clave de carga</h2>
+        <p>${reintento ? 'La clave no es correcta. Probá de nuevo.' : 'Para guardar cambios se necesita la clave de carga del equipo. Se recuerda en este navegador.'}</p>
+        <label>Clave<input type="password" name="clave" required autocomplete="current-password"></label>
+        <div class="acciones"><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn primario" value="ok">Guardar</button></div>
+      </form></dialog>`);
+    document.body.appendChild(d);
+    d.addEventListener('close', () => { const v = d.returnValue === 'ok' ? d.querySelector('input').value.trim() : null; d.remove(); pedidoEnCurso = null; resolve(v || null); });
+    d.showModal();
+  });
+  return pedidoEnCurso;
+}

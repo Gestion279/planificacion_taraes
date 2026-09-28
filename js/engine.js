@@ -19,6 +19,12 @@ export const CONFIG = {
   coberturaMin: 50,       // % de actividades con estado para confiar en el cumplimiento
 };
 
+// Datos que se cargan en la aplicación (no vienen del Excel). Los completa app.js.
+//   reales:      "semana|personaId"            → horas reales de la semana
+//   riesgos:     "personaId|riesgo normalizado" → { prob, impacto }
+//   excepciones: "personaId|tareaNorm|regla"    → revisado en Auditoría
+export const CTX = { reales: new Map(), riesgos: new Map(), excepciones: new Set() };
+
 export const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 export const PRIORIDADES = ['Alta', 'Media', 'Baja', 'Sin prioridad'];
 
@@ -54,13 +60,16 @@ export const tieneRecursos = (r) => !!(r.recursos && r.recursos.trim());
 export function estadoDe(r) {
   const t = norm(r.estado);
   if (!t) return 'Sin estado';
-  if (/pendient|no cumpl|incumpl|incomplet|atrasad|demorad|no realizad|cancelad|sin avance/.test(t)) return 'Pendiente';
+  if (/cancelad|anulad|suspendid/.test(t)) return 'Cancelada';
+  if (/pendient|no cumpl|incumpl|incomplet|atrasad|demorad|no realizad|sin avance/.test(t)) return 'Pendiente';
   if (/proceso|parcial|en curso|avanzad/.test(t)) return 'En curso';
   if (/cumplid|complet|realizad|finaliz|\bok\b|\bsi\b|hecho|terminad|entregad|enviad|actualizad|cerrad/.test(t)) return 'Cumplida';
   return 'Otro';
 }
 const ESTADO_SCORE = { Cumplida: 1, 'En curso': 0.5, Pendiente: 0 };
-export const ESTADOS = ['Cumplida', 'En curso', 'Pendiente', 'Otro', 'Sin estado'];
+// Cancelada no cuenta para el cumplimiento. Valores acordados para la columna Estado del Excel:
+export const ESTADOS_EXCEL = ['Pendiente', 'En curso', 'Cumplida', 'Cancelada'];
+export const ESTADOS = ['Cumplida', 'En curso', 'Pendiente', 'Cancelada', 'Otro', 'Sin estado'];
 
 // ---------- clave de tarea: ÚNICA definición de "misma tarea" para repetitivas/recurrentes ----------
 const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 'en', 'con', 'para', 'por',
@@ -86,9 +95,12 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
     const nSem = semanas > 1 ? new Set(rs.map((r) => r.semana)).size || 1 : 1;
     const conEstado = rs.filter((r) => estadoDe(r) !== 'Sin estado');
     const puntuables = rs.map((r) => ESTADO_SCORE[estadoDe(r)]).filter((v) => v !== undefined);
-    const conReal = rs.filter((r) => r.real !== null && r.real !== undefined);
-    const planConReal = sum(conReal, (r) => r.horas);
-    const realTotal = sum(conReal, (r) => r.real);
+    const jornada = Number(rs[0].jornada) || CONFIG.jornada;
+    // horas reales: total por persona y semana (se cargan en Personas)
+    const semanasP = [...new Set(rs.map((r) => r.semana))];
+    const semConReal = semanasP.filter((s) => CTX.reales.has(`${s}|${rs[0].personaId}`));
+    const realTotal = sum(semConReal, (s) => CTX.reales.get(`${s}|${rs[0].personaId}`));
+    const planConReal = sum(rs.filter((r) => semConReal.includes(r.semana)), (r) => r.horas);
     const prio = { Alta: 0, Media: 0, Baja: 0, 'Sin prioridad': 0 };
     const prioH = { Alta: 0, Media: 0, Baja: 0, 'Sin prioridad': 0 };
     rs.forEach((r) => { prio[prioridadDe(r)]++; prioH[prioridadDe(r)] += r.horas || 0; });
@@ -100,15 +112,17 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
       area: rs[0].area,
       actividades: rs.length / nSem,
       horas: horas / nSem,
-      ocupacion: pct(horas / nSem, CONFIG.jornada),
+      jornada,
+      ocupacion: pct(horas / nSem, jornada),
       semanas: nSem,
       cumplimiento: puntuables.length ? (sum(puntuables) / puntuables.length) * 100 : null,
       cobertura: pct(conEstado.length, rs.length),
       pendientes: rs.filter((r) => estadoDe(r) === 'Pendiente'),
-      horasReales: conReal.length ? realTotal : null,
-      desvio: conReal.length ? realTotal - planConReal : null,
-      desvioPct: conReal.length && planConReal > 0 ? ((realTotal - planConReal) / planConReal) * 100 : null,
-      coberturaReal: pct(conReal.length, rs.length),
+      horasReales: semConReal.length ? realTotal / nSem : null,
+      realSemana: semanasP.length === 1 ? CTX.reales.get(`${semanasP[0]}|${rs[0].personaId}`) ?? null : null,
+      desvio: semConReal.length ? realTotal - planConReal : null,
+      desvioPct: semConReal.length && planConReal > 0 ? ((realTotal - planConReal) / planConReal) * 100 : null,
+      coberturaReal: pct(semConReal.length, semanasP.length),
       prio, prioH, horasDia,
       conRiesgo: rs.filter(tieneRiesgo).length,
       riesgosDistintos: new Set(rs.filter(tieneRiesgo).map((r) => norm(r.riesgos))).size,
@@ -160,7 +174,7 @@ export function alertas(rows) {
   for (const p of statsPersonas(rows)) {
     const n = p.rows.length;
     if (p.ocupacion > CONFIG.ocupCritica)
-      add('sobrecarga', 'critica', p, `${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}% de ${CONFIG.jornada} h)`,
+      add('sobrecarga', 'critica', p, `${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}% de su jornada de ${round1(p.jornada)} h)`,
         'La carga supera la jornada de referencia: riesgo de incumplimiento y desgaste.');
     else if (p.ocupacion > CONFIG.ocupAlta)
       add('sobrecarga', 'advertencia', p, `${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}%)`,
@@ -222,16 +236,22 @@ export const REGLAS_AUDITORIA = [
   { id: 'posible_duplicado', nombre: 'Posible duplicado', grave: false, porque: 'Misma tarea, misma persona y mismo día más de una vez.', test: (r) => r.ordinal > 1 && !!r.tarea },
   { id: 'sin_recursos', nombre: 'Sin recursos', grave: false, porque: 'No se indicó qué se necesita para cumplir la tarea.', test: (r) => !tieneRecursos(r) },
   { id: 'sin_riesgo', nombre: 'Sin riesgo informado', grave: false, porque: 'No se indicó si la tarea tiene riesgos o bloqueos.', test: (r) => !tieneRiesgo(r) },
+  { id: 'estado_no_reconocido', nombre: 'Estado no reconocido', grave: false, porque: 'El Estado no es uno de los valores acordados (Pendiente, En curso, Cumplida, Cancelada), así que no cuenta para el cumplimiento.', test: (r) => estadoDe(r) === 'Otro' },
   { id: 'sin_estado', nombre: 'Sin estado', grave: false, porque: 'Sin estado no se puede medir el cumplimiento.', test: (r) => estadoDe(r) === 'Sin estado' },
 ];
+
+export const claveExcepcion = (r, regla) => `${r.personaId}|${r.tareaNorm || ''}|${regla}`;
 
 export function auditoria(rows, semanaInicio) {
   const ctx = { semana: semanaInicio, semanaFin: semanaInicio ? addDays(semanaInicio, 6) : null };
   return REGLAS_AUDITORIA.map((regla) => {
-    const items = rows.filter((r) => regla.test(r, ctx));
+    const todos = rows.filter((r) => regla.test(r, ctx));
+    // lo marcado como revisado (misma persona, misma tarea, misma regla) no vuelve a aparecer
+    const revisadas = todos.filter((r) => CTX.excepciones.has(claveExcepcion(r, regla.id)));
+    const items = todos.filter((r) => !CTX.excepciones.has(claveExcepcion(r, regla.id)));
     const personas = [...groupBy(items, (r) => r.persona)].map(([p, rs]) => ({ persona: p, cantidad: rs.length }))
       .sort((a, b) => b.cantidad - a.cantidad);
-    return { ...regla, items, personas, pct: pct(items.length, rows.length) };
+    return { ...regla, items, revisadas, personas, pct: pct(items.length, rows.length) };
   });
 }
 
@@ -283,6 +303,10 @@ const MATRIZ = {
   alto: { bajo: 'alto', moderado: 'alto', alto: 'crítico' },
 };
 export const nivelRiesgo = (prob, impacto) => (prob && impacto ? MATRIZ[prob][impacto] : null);
+export const claveRiesgo = (personaId, riesgo) => `${personaId}|${norm(riesgo)}`;
+// La evaluación se guarda por persona + texto del riesgo: se hereda en todas las semanas
+export const evaluacionDe = (r) => CTX.riesgos.get(claveRiesgo(r.personaId, r.riesgos)) || {};
+export const nivelDe = (r) => { const e = evaluacionDe(r); return nivelRiesgo(e.prob, e.impacto); };
 
 // =====================================================================
 // Serie semanal para Evolución
@@ -294,18 +318,32 @@ export function serieSemanal(rows, cambios, semanas) {
     const rs = porSemana.get(s) || [];
     const k = kpisSemana(rs);
     const cs = cambiosPorSemana.get(s) || [];
-    const conReal = rs.filter((r) => r.real !== null && r.real !== undefined);
-    const plan = sum(conReal, (r) => r.horas);
+    const personasReal = [...new Set(rs.map((r) => r.personaId))].filter((id) => CTX.reales.has(`${s}|${id}`));
+    const real = sum(personasReal, (id) => CTX.reales.get(`${s}|${id}`));
+    const plan = sum(rs.filter((r) => personasReal.includes(r.personaId)), (r) => r.horas);
     return {
       semana: s, ...k,
       riesgos: rs.filter(tieneRiesgo).length,
-      horasReales: conReal.length ? sum(conReal, (r) => r.real) : null,
-      desvioPct: conReal.length && plan > 0 ? ((sum(conReal, (r) => r.real) - plan) / plan) * 100 : null,
+      horasReales: personasReal.length ? real : null,
+      desvioPct: personasReal.length && plan > 0 ? ((real - plan) / plan) * 100 : null,
       agregadas: cs.filter((c) => c.tipo === 'alta').length,
       modificadas: new Set(cs.filter((c) => c.tipo === 'modificacion' && c.origen === 'excel').map((c) => c.actividadId)).size,
       retiradas: cs.filter((c) => c.tipo === 'retiro').length,
     };
   });
+}
+
+// =====================================================================
+// Cobertura de carga: quiénes planificaron habitualmente y esta semana no
+// =====================================================================
+export function coberturaCarga(filasSemana, filasPrevias) {
+  const actuales = new Set(filasSemana.map((r) => r.personaId));
+  const habituales = new Map();
+  filasPrevias.forEach((r) => habituales.set(r.personaId, { persona: r.persona, area: r.area }));
+  filasSemana.forEach((r) => habituales.set(r.personaId, { persona: r.persona, area: r.area }));
+  const faltan = [...habituales].filter(([id]) => !actuales.has(id)).map(([, v]) => v)
+    .sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
+  return { habituales: habituales.size, cargaron: actuales.size, faltan };
 }
 
 // =====================================================================
@@ -343,7 +381,7 @@ export function recomendaciones({ rows, rangeRows = [], persona = null }) {
   for (const p of sobre) {
     const libre = stats.filter((q) => q.area === p.area && q.persona !== p.persona && q.ocupacion < 70)
       .sort((a, b) => a.ocupacion - b.ocupacion)[0];
-    const exceso = p.horas - CONFIG.jornada;
+    const exceso = p.horas - p.jornada;
     out.push({
       texto: libre ? `Pasar parte de las tareas de ${p.persona} (${round1(exceso)} h por encima de la jornada) a ${libre.persona}, que tiene ${round1(libre.horas)} h planificadas.`
                    : `Revisar la planificación de ${p.persona}: supera la jornada en ${round1(exceso)} h y no hay otra persona del área con capacidad libre.`,
@@ -356,15 +394,21 @@ export function recomendaciones({ rows, rangeRows = [], persona = null }) {
     out.push({ texto: `Completar la columna Estado del Excel: hoy solo el ${Math.round(conEstado)}% de las actividades${persona ? ` de ${persona}` : ''} tiene estado, y el cumplimiento se calcula sobre ese porcentaje.`,
       motivo: 'Cobertura de seguimiento', modulo: 'riesgos' });
 
+  const semanasBase = [...new Set(base.map((r) => r.semana))];
+  const conReal = [...new Set(base.map((r) => r.personaId))].filter((id) => semanasBase.some((s) => CTX.reales.has(`${s}|${id}`))).length;
+  if (conReal === 0)
+    out.push({ texto: `Cargar las horas reales de la semana${persona ? ` de ${persona}` : ' de cada persona'} en Personas: es un solo número por persona y permite medir el desvío frente a lo planificado.`,
+      motivo: 'Plan vs real', modulo: 'personas' });
+
   const hTot = sum(base, (r) => r.horas);
   const hAlta = sum(base.filter((r) => r.prioridad === 'Alta'), (r) => r.horas);
   if (hTot > 0 && hAlta / hTot > CONFIG.altaShareMax)
     out.push({ texto: `Revisar el criterio de prioridades: el ${Math.round((hAlta / hTot) * 100)}% de las horas está marcado como Alta.`,
       motivo: 'Prioridades', modulo: 'planificacion' });
 
-  const sinEvaluar = base.filter((r) => tieneRiesgo(r) && !nivelRiesgo(r.riesgoProb, r.riesgoImpacto)).length;
+  const sinEvaluar = new Set(base.filter((r) => tieneRiesgo(r) && !nivelDe(r)).map((r) => claveRiesgo(r.personaId, r.riesgos))).size;
   if (sinEvaluar >= 3)
-    out.push({ texto: `Evaluar probabilidad e impacto de ${sinEvaluar} riesgos declarados que todavía no tienen nivel.`,
+    out.push({ texto: `Evaluar probabilidad e impacto de ${sinEvaluar} riesgos declarados que todavía no tienen nivel. Cada evaluación se aplica sola en las semanas siguientes.`,
       motivo: 'Riesgos declarados', modulo: 'riesgos' });
 
   const rangeBase = persona ? rangeRows.filter((r) => r.persona === persona) : rangeRows;

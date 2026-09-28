@@ -2,8 +2,8 @@
 // Planificación de tareas — núcleo de la aplicación
 // =====================================================================
 import * as db from './db.js';
-import { esc, rangoSemana, limpiarGraficos, aviso } from './ui.js';
-import { addDays } from './engine.js';
+import { esc, rangoSemana, limpiarGraficos, aviso, pedirClave } from './ui.js';
+import { addDays, CTX } from './engine.js';
 import * as resumen from './modules/resumen.js';
 import * as planificacion from './modules/planificacion.js';
 import * as personas from './modules/personas.js';
@@ -24,6 +24,7 @@ export const app = {
   modulo: 'resumen',
   params: {},
   _cache: new Map(),
+  _completas: new Set(),
   _cacheCambios: new Map(),
 
   semanaPrevia() {
@@ -43,13 +44,18 @@ export const app = {
     return hastaYAntes.slice(-p.n);
   },
 
-  async filasDe(semanas) {
-    const faltan = semanas.filter((s) => !this._cache.has(s.id)).map((s) => s.id);
+  // completas: con todas las columnas (semana seleccionada y anterior); el resto, solo columnas de análisis
+  async filasDe(semanas, { completas = false } = {}) {
+    const faltan = semanas.filter((s) => !this._cache.has(s.id) || (completas && !this._completas.has(s.id))).map((s) => s.id);
     if (faltan.length) {
-      const [rows, cambios] = await Promise.all([db.actividades(faltan), db.cambios(faltan)]);
-      faltan.forEach((id) => { this._cache.set(id, []); this._cacheCambios.set(id, []); });
+      const nuevasSemanas = faltan.filter((id) => !this._cacheCambios.has(id));
+      const [rows, cambios, reales] = await Promise.all([
+        db.actividades(faltan, { completas }), db.cambios(nuevasSemanas), db.horasReales(nuevasSemanas)]);
+      faltan.forEach((id) => { this._cache.set(id, []); if (completas) this._completas.add(id); });
+      nuevasSemanas.forEach((id) => this._cacheCambios.set(id, []));
       rows.forEach((r) => this._cache.get(r.semanaId).push(r));
       cambios.forEach((c) => this._cacheCambios.get(c.semanaId)?.push(c));
+      reales.forEach((x) => CTX.reales.set(`${x.semana}|${x.personaId}`, x.horas));
     }
     return {
       semanas: semanas.map((s) => s.inicio),
@@ -58,18 +64,31 @@ export const app = {
     };
   },
 
+  // Datos cargados en la aplicación que valen para todas las semanas
+  async cargarContexto() {
+    const [riesgos, excepciones] = await Promise.all([db.riesgosEvaluados(), db.excepcionesAuditoria()]);
+    CTX.riesgos = new Map(riesgos.map((x) => [`${x.persona_id}|${x.riesgo_norm}`, { prob: x.prob, impacto: x.impacto }]));
+    CTX.excepciones = new Set(excepciones.map((x) => `${x.persona_id}|${x.tarea_norm}|${x.regla}`));
+  },
+
+  actualizarPersona(personaId, patch) {
+    for (const rows of this._cache.values()) rows.forEach((r) => { if (r.personaId === personaId) Object.assign(r, patch); });
+  },
+
   async seleccionarSemana(id) {
     this.semana = this.semanas.find((s) => s.id === id) || this.semanas[0] || null;
     if (!this.semana) { this.filas = []; this.filasPrevia = []; this.cambiosSemana = []; return; }
     const prev = this.semanaPrevia();
-    const { rows, cambios } = await this.filasDe([this.semana]);
-    this.filas = rows; this.cambiosSemana = cambios;
-    this.filasPrevia = prev ? (await this.filasDe([prev])).rows : [];
+    const { rows, cambios } = await this.filasDe(prev ? [this.semana, prev] : [this.semana], { completas: true });
+    this.filas = rows.filter((r) => r.semanaId === this.semana.id);
+    this.filasPrevia = prev ? rows.filter((r) => r.semanaId === prev.id) : [];
+    this.cambiosSemana = cambios.filter((c) => c.semanaId === this.semana.id);
   },
 
   // Se llama después de una carga: recarga la lista de semanas y vacía la caché
   async refrescar(semanaInicio = null) {
-    this._cache.clear(); this._cacheCambios.clear();
+    this._cache.clear(); this._completas.clear(); this._cacheCambios.clear(); CTX.reales.clear();
+    await this.cargarContexto();
     this.semanas = await db.semanas();
     this.areas = await db.areas();
     const destino = semanaInicio ? this.semanas.find((s) => s.inicio === semanaInicio) : this.semana;
@@ -139,8 +158,8 @@ async function render() {
 async function entrarApp() {
   $('#app').hidden = false;
   $('#contenido').innerHTML = '<div class="cargando">Cargando semanas…</div>';
-  app.semanas = await db.semanas();
-  app.areas = await db.areas();
+  const [semanas, areas] = await Promise.all([db.semanas(), db.areas(), app.cargarContexto()]);
+  app.semanas = semanas; app.areas = areas;
   // Al abrir: última semana cargada (no la semana calendario).
   await app.seleccionarSemana(app.semanas[0]?.id);
   pintarSelector();
@@ -148,6 +167,7 @@ async function entrarApp() {
 }
 
 async function iniciar() {
+  db.configurarPedidoDeClave(pedirClave);
   try { await db.iniciar(); }
   catch (e) { document.body.innerHTML = `<div class="error-bloque"><h1>Configuración incompleta</h1><p>${esc(e.message)}</p></div>`; return; }
 
