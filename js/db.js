@@ -79,6 +79,12 @@ async function todo(consulta) {
 // Para semanas que no son la seleccionada alcanza con las columnas de análisis (menos datos por la red)
 const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada';
 
+// Una fila por persona y semana con planificación (cuadro de cumplimiento de carga)
+export async function personaSemana() {
+  const rows = await todo((opc) => sb.from('v_persona_semana').select('semana_inicio,persona,area', opc).order('semana_inicio'));
+  return rows.map((r) => ({ semana: r.semana_inicio, persona: r.persona, area: r.area }));
+}
+
 export async function semanas() {
   const { data, error } = await sb.from('v_semanas').select('*').gt('actividades', 0).order('fecha_inicio', { ascending: false });
   if (error) throw new Error(error.message);

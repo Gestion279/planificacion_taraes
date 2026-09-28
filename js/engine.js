@@ -437,3 +437,33 @@ export function lunesDe(iso) {
   return addDays(iso, -((dow + 6) % 7));
 }
 export function recortar(s, n) { return s && s.length > n ? s.slice(0, n - 1) + '…' : s || ''; }
+
+// =====================================================================
+// Cumplimiento de carga: semanas con planificación sobre el total
+// registros: [{ semana: 'YYYY-MM-DD', persona, area }] (una fila por persona y semana con actividades)
+// semanas: ['YYYY-MM-DD', ...] en orden; la primera es la semana 1
+// =====================================================================
+export function nivelSemaforo(p) {
+  if (p === null || p === undefined) return null;
+  if (p < 25) return 'rojo';
+  if (p < 50) return 'naranja';
+  if (p < 75) return 'amarillo';
+  return 'verde';
+}
+
+export function cumplimientoCarga(registros, semanas) {
+  const idx = new Map(semanas.map((s, i) => [s, i]));
+  const porPersona = new Map();
+  for (const r of registros) {
+    if (!idx.has(r.semana)) continue;
+    if (!porPersona.has(r.persona)) porPersona.set(r.persona, { persona: r.persona, area: r.area, marcas: semanas.map(() => false) });
+    porPersona.get(r.persona).marcas[idx.get(r.semana)] = true;
+  }
+  const total = semanas.length;
+  const personas = [...porPersona.values()].map((p) => {
+    const conPlan = p.marcas.filter(Boolean).length;
+    const pct = total ? (conPlan / total) * 100 : null;
+    return { ...p, conPlan, total, pct, nivel: nivelSemaforo(pct) };
+  }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
+  return { semanas: semanas.map((inicio, i) => ({ numero: i + 1, inicio })), personas };
+}
