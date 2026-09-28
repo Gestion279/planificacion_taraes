@@ -127,6 +127,14 @@ informa acá, sino en el módulo *Riesgos y Auditoría*, para no duplicar.
   inserciones ni borrados directos: los datos del Excel solo cambian a través de esta
   función, y cada carga queda registrada con el nombre indicado en *Cargado por*.
 
+## 8 bis. Mejoras de la versión 2 (migración 007)
+
+- **Alias de personas.** Antes de buscar por nombre, se busca en `personas_alias`. Cuando se unifican dos personas, el nombre mal escrito queda como alias y las cargas siguientes lo resuelven solas.
+- **Persona parecida.** Si una carga trae una persona nueva cuyo nombre se parece a una existente (similitud ≥ 0,5), la vista previa agrega la observación `persona_similar`.
+- **Clave de carga.** La vista previa es libre; confirmar exige la clave si está definida (`definir_clave_carga`).
+- **Horas en formato hora.** El lector del Excel detecta celdas con valores de hora guardados como fracción de día (por ejemplo 0,0417 = 1 h), las convierte a horas y avisa cuántas fueron.
+- **Campos de la aplicación.** Las horas reales (por persona y semana), la evaluación de riesgos (por persona y texto del riesgo), la jornada y las observaciones revisadas se guardan en tablas propias mediante funciones que validan la clave. El Excel nunca las modifica.
+
 ## 9. Pruebas realizadas (25/09/2026)
 
 | Escenario | Resultado |
@@ -139,4 +147,5 @@ informa acá, sino en el módulo *Riesgos y Auditoría*, para no duplicar.
 | Tarea borrada del Excel | Retirada (no eliminada) |
 | Tarea borrada que vuelve | Reactivada, sin duplicar |
 | Horas reales cargadas en la app + nueva carga | Horas reales conservadas |
+| Uso real: 28 cargas, recargas del 28/09 | Sin duplicados; Gestión 15 nuevas y 394 sin cambios; Producción 17 modificadas (corrección de horas) |
 | Visitante con el enlace (acceso público, migración 006) | Puede ver, importar y cargar horas reales; no puede borrar ni editar datos del Excel |
