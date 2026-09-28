@@ -13,9 +13,10 @@ export const titulo = 'Carga';
 const OBS = {
   sin_fecha: 'Sin fecha', fecha_fuera_semana: 'Fecha fuera de la semana', dia_inconsistente: 'Día no coincide con la fecha',
   horas_invalidas: 'Tiempo no interpretable', prioridad_no_reconocida: 'Importancia no reconocida', posible_duplicado: 'Posible duplicado',
-  persona_ausente: 'Persona que no vino en el archivo', persona_similar: 'Persona nueva con nombre parecido', persona_otra_area: 'Persona de otra área', archivo_repetido: 'Archivo repetido',
+  persona_ausente: 'Persona que no vino en el archivo (se retira)', persona_similar: 'Persona nueva con nombre parecido',
+  persona_renombrada: 'Nombre corregido', persona_otra_area: 'Persona de otra área', archivo_repetido: 'Archivo repetido',
 };
-const CAMPOS = { fecha: 'fecha', dia: 'día', tarea: 'tarea', prioridad: 'prioridad', horas_planificadas: 'tiempo', recursos: 'recursos', riesgos: 'riesgos', estado: 'estado' };
+const CAMPOS = { persona: 'persona', fecha: 'fecha', dia: 'día', tarea: 'tarea', prioridad: 'prioridad', horas_planificadas: 'tiempo', recursos: 'recursos', riesgos: 'riesgos', estado: 'estado' };
 // Nombre de quien carga: preferencia de interfaz guardada en este navegador (no es un dato de negocio)
 const leerNombre = () => { try { return localStorage.getItem('planif.cargadoPor') || ''; } catch { return ''; } };
 const guardarNombre = (v) => { try { localStorage.setItem('planif.cargadoPor', v); } catch { /* opcional */ } };
