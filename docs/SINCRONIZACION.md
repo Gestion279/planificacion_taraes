@@ -54,9 +54,17 @@ final revierte todo. Lo que el usuario ve antes de confirmar es lo que va a pasa
 Una carga afecta **solo a su semana y a su área**. Subir el archivo de Producción
 nunca toca actividades de Gestión, y viceversa.
 
-Dentro de ese alcance, además, **solo se retiran tareas de personas que vinieron en
-el archivo**. Si falta la hoja de una persona, sus tareas se conservan y se genera
-la observación `persona_ausente` (protege contra archivos incompletos).
+Dentro de ese alcance **el último archivo manda** (desde la migración 009): lo que no
+viene en el archivo se retira, incluso si falta la hoja completa de una persona. Nada
+se borra: lo retirado queda en el historial y vuelve si se carga de nuevo. La vista
+previa lo informa con la observación `persona_ausente` antes de confirmar.
+
+**Nombres corregidos.** Si una persona deja de venir y en el mismo archivo viene otra
+con un nombre parecido (similitud ≥ 0,5) que tiene al menos la mitad de sus mismas
+tareas, se trata como la misma persona con el nombre corregido (`persona_renombrada`):
+sus actividades pasan al nombre nuevo conservando historial, horas reales y
+evaluaciones. Si el nombre viejo ya no tiene actividades en ninguna semana, se elimina
+y queda como alias, así un archivo que repita el error de tipeo se corrige solo.
 
 ## 4. Identificación de una actividad
 
@@ -111,7 +119,8 @@ Se importan igual, pero se informan en el resumen y quedan guardadas en `importa
 | `horas_invalidas` | El tiempo no se pudo interpretar como número |
 | `prioridad_no_reconocida` | La importancia no es Alta / Media / Baja |
 | `posible_duplicado` | Misma tarea, persona y día más de una vez |
-| `persona_ausente` | Persona con tareas en la semana que no vino en el archivo |
+| `persona_ausente` | Persona con tareas en la semana que no vino en el archivo: sus tareas se retiran |
+| `persona_renombrada` | Nombre corregido: las tareas pasan al nombre nuevo |
 | `persona_otra_area` | La persona figura en otra área |
 | `archivo_repetido` | Mismo archivo que una carga anterior |
 
@@ -147,5 +156,6 @@ informa acá, sino en el módulo *Riesgos y Auditoría*, para no duplicar.
 | Tarea borrada del Excel | Retirada (no eliminada) |
 | Tarea borrada que vuelve | Reactivada, sin duplicar |
 | Horas reales cargadas en la app + nueva carga | Horas reales conservadas |
+| Recarga con nombre corregido (Caludia → Claudia) y una hoja menos | Nombre corregido detectado, 1 modificada, 2 sin cambios, 2 retiradas; el nombre viejo queda como alias |
 | Uso real: 28 cargas, recargas del 28/09 | Sin duplicados; Gestión 15 nuevas y 394 sin cambios; Producción 17 modificadas (corrección de horas) |
 | Visitante con el enlace (acceso público, migración 006) | Puede ver, importar y cargar horas reales; no puede borrar ni editar datos del Excel |
