@@ -104,6 +104,10 @@ export async function render(el, app) {
 
 // Cuadro persona × semana: ✓ si esa semana tiene planificación, ✗ si no.
 // Semana 1 = primera semana registrada; llega hasta la semana seleccionada.
+// Orden del cuadro (se conserva mientras la aplicación está abierta)
+const ORDEN_CC = { col: 'persona', dir: 1 };
+const FILAS_VISIBLES = 10;
+
 async function cuadroCargaSemanal(cont, app) {
   const hasta = app.semana.inicio;
   const semanas = [...app.semanas].reverse().map((s) => s.inicio).filter((s) => s <= hasta);
@@ -113,15 +117,49 @@ async function cuadroCargaSemanal(cont, app) {
   if (!datos.personas.length) { cont.innerHTML = '<p class="vacio">Sin datos.</p>'; return; }
   const OK = '<svg class="ico-ok" viewBox="0 0 20 20" aria-label="Con planificación" role="img"><path d="M4 10.5l4 4 8-9"/></svg>';
   const NO = '<svg class="ico-no" viewBox="0 0 20 20" aria-label="Sin planificación" role="img"><path d="M5 5l10 10M15 5L5 15"/></svg>';
-  cont.innerHTML = `<div class="tabla-scroll"><table class="cuadro-carga">
-    <thead><tr><th scope="col" class="cc-persona">Persona</th>
-      ${datos.semanas.map((s) => `<th scope="col" class="${s.inicio === hasta ? 'cc-actual' : ''}" title="Semana ${s.numero}: del ${fechaCorta(s.inicio)}">${s.numero}<span>${fechaCorta(s.inicio)}</span></th>`).join('')}
-      <th scope="col" class="cc-pct">Cumplimiento<span>semanas con planificación</span></th></tr></thead>
-    <tbody>${datos.personas.map((p) => `<tr>
-      <th scope="row" class="cc-persona"><a href="#/personas?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
-      ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m ? OK : NO}</td>`).join('')}
-      <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
-    </tr>`).join('')}</tbody>
-  </table></div>
-  <p class="nota">La semana 1 es la primera semana registrada (${fechaCorta(datos.semanas[0].inicio)}). El cumplimiento es la cantidad de semanas con planificación sobre el total de semanas${semanas.length < app.semanas.length ? ', hasta la semana seleccionada' : ''}.</p>`;
+  if (ORDEN_CC.col.startsWith('s') && +ORDEN_CC.col.slice(1) >= datos.semanas.length) { ORDEN_CC.col = 'persona'; ORDEN_CC.dir = 1; }
+
+  // valor de orden de cada columna; empates: por nombre
+  const valor = (p, col) => (col === 'persona' ? p.persona : col === 'pct' ? p.pct : (p.marcas[+col.slice(1)] ? 1 : 0));
+  const ordenar = () => [...datos.personas].sort((a, b) => {
+    const va = valor(a, ORDEN_CC.col), vb = valor(b, ORDEN_CC.col);
+    const c = typeof va === 'string' ? va.localeCompare(vb, 'es') : va - vb;
+    return c * ORDEN_CC.dir || a.persona.localeCompare(b.persona, 'es');
+  });
+  const aria = (col) => (ORDEN_CC.col === col ? (ORDEN_CC.dir > 0 ? 'ascending' : 'descending') : 'none');
+  const th = (col, clase, contenido, titulo) =>
+    `<th scope="col" class="${clase}" aria-sort="${aria(col)}"><button type="button" data-orden="${col}" title="${esc(titulo)}">${contenido}</button></th>`;
+
+  const dibujar = () => {
+    const filas = ordenar();
+    cont.innerHTML = `<div class="cc-scroll" tabindex="0" aria-label="Planificación cargada por semana. Desplazá para ver más personas."><table class="cuadro-carga">
+      <thead><tr>
+        ${th('persona', 'cc-persona', 'Persona', 'Ordenar por nombre')}
+        ${datos.semanas.map((s, i) => th(`s${i}`, s.inicio === hasta ? 'cc-actual' : '', `${s.numero}<span>${fechaCorta(s.inicio)}</span>`, `Semana ${s.numero}, del ${fechaCorta(s.inicio)}: ordenar por planificación cargada`)).join('')}
+        ${th('pct', 'cc-pct', 'Cumplimiento<span>semanas con planificación</span>', 'Ordenar por porcentaje de cumplimiento')}
+      </tr></thead>
+      <tbody>${filas.map((p) => `<tr>
+        <th scope="row" class="cc-persona"><a href="#/personas?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
+        ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m ? OK : NO}</td>`).join('')}
+        <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="nota">${filas.length > FILAS_VISIBLES ? `Se ven ${FILAS_VISIBLES} de ${filas.length} personas: desplazá la tabla para ver el resto. ` : ''}Tocá el encabezado de una columna para ordenar; otro toque invierte el orden. La semana 1 es la primera semana registrada (${fechaCorta(datos.semanas[0].inicio)}). El cumplimiento es la cantidad de semanas con planificación sobre el total de semanas${semanas.length < app.semanas.length ? ', hasta la semana seleccionada' : ''}.</p>`;
+
+    // alto visible: encabezado + 10 filas
+    const scroll = cont.querySelector('.cc-scroll');
+    const trs = scroll.querySelectorAll('tbody tr');
+    if (trs.length > FILAS_VISIBLES) {
+      const alto = scroll.querySelector('thead').offsetHeight + [...trs].slice(0, FILAS_VISIBLES).reduce((a, tr) => a + tr.offsetHeight, 0);
+      scroll.style.maxHeight = `${alto + 2}px`;
+    }
+    scroll.querySelectorAll('[data-orden]').forEach((b) => b.addEventListener('click', () => {
+      const col = b.dataset.orden;
+      if (ORDEN_CC.col === col) ORDEN_CC.dir = -ORDEN_CC.dir;
+      else { ORDEN_CC.col = col; ORDEN_CC.dir = col === 'persona' ? 1 : -1; }   // números: primero los más altos
+      dibujar();
+      cont.querySelector(`[data-orden="${col}"]`)?.focus();
+    }));
+  };
+  dibujar();
 }
