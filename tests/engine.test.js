@@ -72,6 +72,18 @@ test('cobertura de carga detecta quién no cargó', () => {
   assert.deepEqual(c.faltan.map((f) => f.persona), ['Beto']);
 });
 
+test('cobertura de carga: cuenta a todas las personas que planificaron antes, aunque haga más de 4 semanas', () => {
+  const previas = [
+    { semana: '2026-06-01', personaId: 'p3', persona: 'Caro', area: 'Producción' },   // última vez hace meses
+    { semana: '2026-08-24', personaId: 'p2', persona: 'Beto', area: 'Producción' },
+    { semana: '2026-09-14', personaId: 'p2', persona: 'Beto', area: 'Producción' },
+  ];
+  const c = E.coberturaCarga([fila({ area: 'Producción', semana: '2026-10-05' })], previas);
+  assert.equal(c.habituales, 3);
+  assert.equal(c.cargaron, 1);
+  assert.deepEqual(c.faltan.map((f) => [f.persona, f.ultima]), [['Beto', '2026-09-14'], ['Caro', '2026-06-01']]);
+});
+
 test('cumplimiento de carga: semanas con planificación sobre el total y semáforo', async () => {
   const { cumplimientoCarga, nivelSemaforo } = await import('../js/engine.js');
   const semanas = ['2026-07-06', '2026-07-13', '2026-07-20', '2026-07-27'];
