@@ -3,7 +3,6 @@
 // Es el lugar PRINCIPAL de los indicadores de semana.
 // =====================================================================
 import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy, cumplimientoCarga } from '../engine.js';
-import * as db from '../db.js';
 import { esc, num, horas, porc, signo, rangoSemana, nivelBadge, fechaCorta } from '../ui.js';
 
 export const titulo = 'Resumen';
@@ -112,7 +111,8 @@ async function cuadroCargaSemanal(cont, app) {
   const hasta = app.semana.inicio;
   const semanas = [...app.semanas].reverse().map((s) => s.inicio).filter((s) => s <= hasta);
   let datos;
-  try { datos = cumplimientoCarga((await db.personaSemana()).filter((r) => app.pasa(r)), semanas); }  // respeta los filtros globales
+  // app.personaSemana ya está en memoria (se recarga después de cada carga de Excel); el área es la del Excel
+  try { datos = cumplimientoCarga(app.personaSemana.filter((r) => app.pasa(r)), semanas); }  // respeta los filtros globales
   catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   if (!datos.personas.length) { cont.innerHTML = '<p class="vacio">Sin datos.</p>'; return; }
   const OK = '<svg class="ico-ok" viewBox="0 0 20 20" aria-label="Con planificación" role="img"><path d="M4 10.5l4 4 8-9"/></svg>';

@@ -3,7 +3,7 @@
 // Horas y actividades por semana, comparación con el promedio y riesgos
 // que se mantienen. Todos los cálculos salen del motor (engine.js).
 // =====================================================================
-import { serieSemanal, riesgosPersistentes, groupBy } from '../engine.js';
+import { serieSemanal, riesgosPersistentes, groupBy, areasDe } from '../engine.js';
 import { esc, num, horas, porc, signo, grafico, opciones, PALETA, etiquetaSemana, tabla } from '../ui.js';
 import { prepararPeriodo } from './periodo.js';
 
@@ -60,7 +60,7 @@ function comparacion(cont, rows, iso, app) {
     const otras = iso.filter((s) => s !== actual && porSem.has(s));
     const prom = otras.length ? otras.reduce((a, s) => a + valor(s), 0) / otras.length : null;
     const act = porSem.has(actual) ? valor(actual) : null;
-    return { persona, area: rs[0].area, serie: iso.map((s) => (porSem.has(s) ? valor(s) : null)), actual: act, prom,
+    return { persona, area: areasDe(rs).join(', '), serie: iso.map((s) => (porSem.has(s) ? valor(s) : null)), actual: act, prom,
       varAbs: act !== null && prom !== null ? act - prom : null, varPct: act !== null && prom ? ((act - prom) / prom) * 100 : null };
   });
   const max = Math.max(1, ...data.flatMap((d) => d.serie.filter((v) => v !== null)));
