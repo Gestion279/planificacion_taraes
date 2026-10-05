@@ -81,8 +81,8 @@ const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,are
 
 // Una fila por persona y semana con planificación (cuadro de cumplimiento de carga)
 export async function personaSemana() {
-  const rows = await todo((opc) => sb.from('v_persona_semana').select('semana_inicio,persona,area', opc).order('semana_inicio'));
-  return rows.map((r) => ({ semana: r.semana_inicio, persona: r.persona, area: r.area }));
+  const rows = await todo((opc) => sb.from('v_persona_semana').select('semana_inicio,persona_id,persona,area', opc).order('semana_inicio'));
+  return rows.map((r) => ({ semana: r.semana_inicio, personaId: r.persona_id, persona: r.persona, area: r.area }));
 }
 
 export async function semanas() {

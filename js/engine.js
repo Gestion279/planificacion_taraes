@@ -340,14 +340,20 @@ export function serieSemanal(rows, cambios, semanas) {
 }
 
 // =====================================================================
-// Cobertura de carga: quiénes planificaron habitualmente y esta semana no
+// Cobertura de carga: quiénes planificaron alguna vez (hasta la semana) y esta semana no.
+// filasPrevias puede ser de actividades o de registros persona-semana: solo usa personaId, persona, area y semana.
 // =====================================================================
 export function coberturaCarga(filasSemana, filasPrevias) {
   const actuales = new Set(filasSemana.map((r) => r.personaId));
   const habituales = new Map();
-  filasPrevias.forEach((r) => habituales.set(r.personaId, { persona: r.persona, area: r.area }));
-  filasSemana.forEach((r) => habituales.set(r.personaId, { persona: r.persona, area: r.area }));
-  const faltan = [...habituales].filter(([id]) => !actuales.has(id)).map(([, v]) => v)
+  for (const r of [...filasPrevias, ...filasSemana]) {
+    if (!habituales.has(r.personaId)) habituales.set(r.personaId, { persona: r.persona, areas: new Set(), ultima: null });
+    const h = habituales.get(r.personaId);
+    if (r.area) h.areas.add(r.area);
+    if (r.semana && (!h.ultima || r.semana > h.ultima)) h.ultima = r.semana;
+  }
+  const faltan = [...habituales].filter(([id]) => !actuales.has(id))
+    .map(([, { areas, ...v }]) => ({ ...v, area: [...areas].sort((a, b) => a.localeCompare(b, 'es')).join(', ') }))
     .sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
   return { habituales: habituales.size, cargaron: actuales.size, faltan };
 }
