@@ -3,7 +3,7 @@
 // Es el lugar PRINCIPAL de los indicadores de semana.
 // =====================================================================
 import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy, cumplimientoCarga } from '../engine.js';
-import { esc, num, horas, porc, signo, rangoSemana, nivelBadge, fechaCorta } from '../ui.js';
+import { esc, num, horas, porc, signo, rangoSemana, nivelBadge, fechaCorta, etiquetaSemana } from '../ui.js';
 
 export const titulo = 'Resumen';
 
@@ -32,9 +32,9 @@ export async function render(el, app) {
     return h && h.semanas >= 2 && h.horas > 0 && p.horas > 0 ? { ...p, prom: h.horas, var: ((p.horas - h.horas) / h.horas) * 100 } : null;
   }).filter((x) => x && Math.abs(x.var) >= 25).sort((a, b) => Math.abs(b.var) - Math.abs(a.var)).slice(0, 5);
 
-  // cobertura de carga: quienes planificaron en alguna de las 4 semanas anteriores y esta no
-  const previas4 = new Set(periodo.map((s) => s.inicio).filter((s) => s < app.semana.inicio).slice(-4));
-  const cob = coberturaCarga(app.filas, rango.filter((r) => previas4.has(r.semana)));
+  // cobertura de carga: quienes planificaron en cualquier semana anterior (las mismas personas del cuadro
+  // "Planificación cargada por semana", con los filtros globales) y esta semana no
+  const cob = coberturaCarga(app.filas, app.personaSemana.filter((r) => r.semana < app.semana.inicio && app.pasa(r)));
 
   const alertasTop = k.alertas.filter((a) => a.nivel !== 'info');
   const porRegla = groupBy(alertasTop, (a) => a.nombre);
@@ -74,7 +74,7 @@ export async function render(el, app) {
   <div class="grid-2">
     <section class="panel">
       <header class="panel-cab"><h2>Puntos a revisar</h2><a href="#/riesgos?tab=alertas">Todas las alertas</a></header>
-      ${cob.faltan.length ? `<p class="faltan"><span class="badge n-advertencia">Carga incompleta</span> <b>Sin planificación esta semana:</b> ${cob.faltan.map((f) => `${esc(f.persona)} <span class="tenue">(${esc(f.area)})</span>`).join(', ')}. Planificaron en alguna de las 4 semanas anteriores.</p>` : ''}
+      ${cob.faltan.length ? `<p class="faltan"><span class="badge n-advertencia">Carga incompleta</span> <b>Sin planificación esta semana:</b> ${cob.faltan.map((f) => `${esc(f.persona)} <span class="tenue">(${esc(f.area)}${f.ultima ? `, última: ${etiquetaSemana(f.ultima)}` : ''})</span>`).join(', ')}.</p>` : ''}
       ${alertasTop.length ? `<ul class="lista-alertas">${[...porRegla].slice(0, 6).map(([regla, as]) => `
         <li>${nivelBadge(as[0].nivel)} <b>${esc(regla)}</b>
           <span>${as.slice(0, 3).map((a) => `<a href="#/personas?persona=${encodeURIComponent(a.persona)}">${esc(a.persona)}</a> <span class="tenue">${esc(a.detalle)}</span>`).join('; ')}${as.length > 3 ? `; y ${as.length - 3} más` : ''}</span></li>`).join('')}</ul>`
