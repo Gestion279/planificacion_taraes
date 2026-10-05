@@ -138,3 +138,29 @@ test('tareas repetitivas: misma tarea más de una vez por persona en el período
   assert.equal(ana.tareas[0].horas, 2);
   assert.equal(ana.tareas[0].horasPorVez, 1);           // promedio sobre las que tienen horas
 });
+
+test('personas por área: el área es la del Excel donde se cargó la actividad', async () => {
+  const { cumplimientoCarga } = await import('../js/engine.js');
+  // Ana figura en Compras, pero esta semana también planificó en el Excel de Ventas
+  const filas = [fila({ area: 'Compras', horas: 30, jornada: 44 }), fila({ area: 'Ventas', horas: 30, jornada: 44 }),
+    fila({ personaId: 'p2', persona: 'Beto', area: 'Ventas', horas: 10, jornada: 44 })];
+  const k = E.kpisSemana(filas);
+  assert.equal(k.personas, 2);                                     // personas únicas, no filas
+  assert.equal(E.kpisSemana(filas.filter((r) => r.area === 'Ventas')).personas, 2);
+  assert.equal(E.kpisSemana(filas.filter((r) => r.area === 'Compras')).personas, 1);
+  const ana = E.statsPersonas(filas).find((p) => p.persona === 'Ana');
+  assert.equal(ana.area, 'Compras, Ventas');
+  assert.deepEqual(ana.areas, ['Compras', 'Ventas']);
+  // redistribución: Beto comparte el área Ventas con Ana
+  assert.match(E.recomendaciones({ rows: filas, rangeRows: filas }).map((r) => r.texto).join(' '), /a Beto/);
+
+  // cuadro de carga: mismo criterio y misma cuenta que los indicadores
+  const semanas = ['2026-09-21'];
+  const reg = [{ semana: '2026-09-21', persona: 'Ana', area: 'Compras' }, { semana: '2026-09-21', persona: 'Ana', area: 'Ventas' },
+    { semana: '2026-09-21', persona: 'Beto', area: 'Ventas' }];
+  const todo = cumplimientoCarga(reg, semanas);
+  assert.equal(todo.personas.length, 2);
+  assert.equal(todo.personas.find((p) => p.persona === 'Ana').area, 'Compras, Ventas');
+  assert.equal(cumplimientoCarga(reg.filter((r) => r.area === 'Ventas'), semanas).personas.length, 2);
+  assert.equal(cumplimientoCarga(reg.filter((r) => r.area === 'Compras'), semanas).personas.length, 1);
+});
