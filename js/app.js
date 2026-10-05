@@ -24,6 +24,10 @@ export const app = {
   cambiosSemana: [],    // cambios posteriores a la primera carga (semana seleccionada, ídem)
   areas: [],
   personas: [],         // catálogo de personas [{id, nombre, area}] para los filtros
+  // Una fila por persona, semana y área del Excel donde planificó. Alimenta el cuadro de carga
+  // del Resumen y dice en qué áreas aparece cada persona (criterio del filtro de área).
+  personaSemana: [],
+  _areasPersona: new Map(),   // nombre → Set de áreas en cuyo Excel planificó alguna vez
   // Filtros globales: se aplican a todas las hojas y se conservan al navegar y al recargar la página.
   filtros: { areas: [], personas: [] },
   _limpiadores: new Map(),   // cada hoja registra cómo limpiar sus filtros propios
@@ -39,6 +43,28 @@ export const app = {
     const f = this.filtros;
     return (!f.areas.length || f.areas.includes(r.area)) && (!f.personas.length || f.personas.includes(r.persona));
   },
+  // Áreas de una persona: las de los Excel donde planificó. Si todavía no planificó, la de su ficha.
+  areasDePersona(nombre) {
+    const s = this._areasPersona.get(nombre);
+    if (s?.size) return s;
+    const area = this.personas.find((p) => p.nombre === nombre)?.area;
+    return new Set(area ? [area] : []);
+  },
+  personaEnAreas(nombre, areas) {
+    if (!areas.length) return true;
+    const propias = this.areasDePersona(nombre);
+    return areas.some((a) => propias.has(a));
+  },
+  async cargarPersonaSemana() {
+    this.personaSemana = await db.personaSemana();
+    this._areasPersona = new Map();
+    for (const r of this.personaSemana) {
+      if (!r.area) continue;
+      if (!this._areasPersona.has(r.persona)) this._areasPersona.set(r.persona, new Set());
+      this._areasPersona.get(r.persona).add(r.area);
+    }
+  },
+
   hayFiltros() {
     const propios = Object.values(this._filtrosHoja).reduce((a, f) => a + Object.values(f).reduce((b, v) => b + (Array.isArray(v) ? v.length : v ? 1 : 0), 0), 0);
     return this.filtros.areas.length + this.filtros.personas.length + propios;
@@ -47,10 +73,9 @@ export const app = {
   // Cambia filtros globales (desde la barra o desde una hoja) y vuelve a dibujar la hoja actual
   async fijarFiltros(patch, { redibujar = true } = {}) {
     Object.assign(this.filtros, patch);
-    // una persona seleccionada que no es de las áreas elegidas deja de estar seleccionada
+    // una persona seleccionada que nunca planificó en las áreas elegidas deja de estar seleccionada
     if (this.filtros.areas.length) {
-      const validas = new Set(this.personas.filter((p) => this.filtros.areas.includes(p.area)).map((p) => p.nombre));
-      this.filtros.personas = this.filtros.personas.filter((n) => validas.has(n));
+      this.filtros.personas = this.filtros.personas.filter((n) => this.personaEnAreas(n, this.filtros.areas));
     }
     try { sessionStorage.setItem('planif.filtros', JSON.stringify(this.filtros)); } catch { /* preferencia opcional */ }
     this.aplicarFiltros();
@@ -154,6 +179,7 @@ export const app = {
     this.semanas = await db.semanas();
     this.areas = await db.areas();
     this.personas = await db.personas();
+    await this.cargarPersonaSemana();
     armarFiltros();
     const destino = semanaInicio ? this.semanas.find((s) => s.inicio === semanaInicio) : this.semana;
     await this.seleccionarSemana(destino?.id || this.semanas[0]?.id);
@@ -225,10 +251,17 @@ async function render(opc = {}) {
 // Los desplegables se arman una vez; al filtrar solo se actualiza lo necesario (el panel abierto no se cierra).
 const MS = { area: null, persona: null };
 function armarFiltroPersona() {
+  // Cada persona aparece una sola vez: agrupada en un área elegida donde planificó,
+  // si no en el área de su ficha (si planificó ahí), si no en la primera donde planificó.
+  const fa = app.filtros.areas;
   const opciones = app.personas
-    .filter((p) => !app.filtros.areas.length || app.filtros.areas.includes(p.area))
-    .sort((a, b) => (a.area || '').localeCompare(b.area || '') || a.nombre.localeCompare(b.nombre, 'es'))
-    .map((p) => ({ valor: p.nombre, texto: p.nombre, grupo: p.area || 'Sin área' }));
+    .filter((p) => app.personaEnAreas(p.nombre, fa))
+    .map((p) => {
+      const propias = app.areasDePersona(p.nombre);
+      const grupo = fa.find((a) => propias.has(a)) || (propias.has(p.area) ? p.area : [...propias].sort((a, b) => a.localeCompare(b, 'es'))[0]) || 'Sin área';
+      return { valor: p.nombre, texto: p.nombre, grupo };
+    })
+    .sort((a, b) => a.grupo.localeCompare(b.grupo, 'es') || a.texto.localeCompare(b.texto, 'es'));
   const nuevo = multiSelect({ etiqueta: 'Persona', opciones, seleccion: app.filtros.personas, todos: 'Todas', compacto: true,
     onChange: (v) => app.fijarFiltros({ personas: v }) });
   if (MS.persona) MS.persona.replaceWith(nuevo); else $('#filtros-globales').append(nuevo);
@@ -259,7 +292,7 @@ function pintarFiltros({ cambioAreas = false } = {}) {
 async function entrarApp() {
   $('#app').hidden = false;
   $('#contenido').innerHTML = '<div class="cargando">Cargando semanas…</div>';
-  const [semanas, areas, personas] = await Promise.all([db.semanas(), db.areas(), db.personas(), app.cargarContexto()]);
+  const [semanas, areas, personas] = await Promise.all([db.semanas(), db.areas(), db.personas(), app.cargarContexto(), app.cargarPersonaSemana()]);
   app.semanas = semanas; app.areas = areas; app.personas = personas;
   try { const f = JSON.parse(sessionStorage.getItem('planif.filtros') || 'null'); if (f) app.filtros = { areas: f.areas || [], personas: f.personas || [] }; } catch { /* sin filtros guardados */ }
   try { app._filtrosHoja = JSON.parse(sessionStorage.getItem('planif.filtrosHoja') || '{}'); } catch { app._filtrosHoja = {}; }

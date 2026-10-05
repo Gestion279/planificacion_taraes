@@ -42,6 +42,11 @@ export function groupBy(arr, keyFn) {
   return m;
 }
 
+// Áreas en que planificó una persona: una persona puede aparecer en el Excel de más de un área.
+export function areasDe(rs) {
+  return [...new Set(rs.map((r) => r.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 export function diaDe(r) {
   if (r.fecha) {
     const [y, m, d] = r.fecha.split('-').map(Number);
@@ -109,7 +114,8 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
     out.push({
       persona,
       personaId: rs[0].personaId,
-      area: rs[0].area,
+      area: areasDe(rs).join(', '),
+      areas: areasDe(rs),
       actividades: rs.length / nSem,
       horas: horas / nSem,
       jornada,
@@ -573,7 +579,7 @@ export function recomendaciones({ rows, rangeRows = [], persona = null }) {
   // Redistribución de carga (solo tiene sentido mirando al equipo)
   const sobre = stats.filter((p) => p.ocupacion > CONFIG.ocupAlta && (!persona || p.persona === persona));
   for (const p of sobre) {
-    const libre = stats.filter((q) => q.area === p.area && q.persona !== p.persona && q.ocupacion < 70)
+    const libre = stats.filter((q) => q.areas.some((a) => p.areas.includes(a)) && q.persona !== p.persona && q.ocupacion < 70)
       .sort((a, b) => a.ocupacion - b.ocupacion)[0];
     const exceso = p.horas - p.jornada;
     out.push({
@@ -650,11 +656,14 @@ export function cumplimientoCarga(registros, semanas) {
   const porPersona = new Map();
   for (const r of registros) {
     if (!idx.has(r.semana)) continue;
-    if (!porPersona.has(r.persona)) porPersona.set(r.persona, { persona: r.persona, area: r.area, marcas: semanas.map(() => false) });
-    porPersona.get(r.persona).marcas[idx.get(r.semana)] = true;
+    if (!porPersona.has(r.persona)) porPersona.set(r.persona, { persona: r.persona, areas: new Set(), marcas: semanas.map(() => false) });
+    const p = porPersona.get(r.persona);
+    p.marcas[idx.get(r.semana)] = true;
+    if (r.area) p.areas.add(r.area);
   }
   const total = semanas.length;
-  const personas = [...porPersona.values()].map((p) => {
+  const personas = [...porPersona.values()].map(({ areas, ...p }) => {
+    p.area = [...areas].sort((a, b) => a.localeCompare(b, 'es')).join(', ');
     const conPlan = p.marcas.filter(Boolean).length;
     const pct = total ? (conPlan / total) * 100 : null;
     return { ...p, conPlan, total, pct, nivel: nivelSemaforo(pct) };
