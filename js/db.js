@@ -148,6 +148,23 @@ export async function importaciones(limite = 100) {
   return data.map((i) => ({ ...i, semana: i.semanas?.fecha_inicio, area: i.areas?.nombre }));
 }
 
+// ---------- propuestas de mejora ----------
+// Devuelve null si la base todavía no tiene la tabla (falta aplicar supabase/propuestas_mejora.sql):
+// la aplicación sigue funcionando y lo avisa en Propuestas de mejora.
+const sinTabla = (error) => /does not exist|PGRST205|PGRST202|Could not find the (table|function)|schema cache/i.test(`${error?.code || ''} ${error?.message || ''}`);
+export async function propuestas() {
+  const { data, error } = await sb.from('propuestas_mejora').select('*').order('created_at', { ascending: false });
+  if (error) { if (sinTabla(error)) return null; throw new Error(error.message); }
+  return data.map((p) => ({ ...p, horas_mes_base: n(p.horas_mes_base), ahorro_pct: n(p.ahorro_pct) }));
+}
+export async function historialPropuesta(id) {
+  const { data, error } = await sb.from('propuestas_historial').select('*').eq('propuesta_id', id).order('id');
+  if (error) throw new Error(error.message);
+  return data;
+}
+export const guardarPropuesta = (id, datos) => conClave((clave) =>
+  sb.rpc('guardar_propuesta', { p_id: id || null, p_datos: datos, p_clave: clave, p_cargado_por: cargadoPor() }));
+
 // ---------- ediciones (validan la clave si está definida) ----------
 export const guardarHorasReales = (semanaId, personaId, horas) => conClave((clave) =>
   sb.rpc('guardar_horas_reales', { p_semana: semanaId, p_persona: personaId, p_horas: horas, p_clave: clave, p_cargado_por: cargadoPor() }));

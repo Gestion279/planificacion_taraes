@@ -198,3 +198,60 @@ export function multiSelect({ etiqueta, opciones, seleccion = [], onChange, todo
   el.fijar = (valores) => { sel = new Set(valores.map(String)); pintar(); };
   return el;
 }
+
+// ---------- situaciones (qué / causa / impacto / acción) ----------
+export const FUENTE_ICONO = { 'Planificación': 'Planificación', Carga: 'Carga', Cumplimiento: 'Cumplimiento', Riesgo: 'Riesgo', 'Auditoría': 'Auditoría', 'Tarea repetitiva': 'Organización' };
+const REVISION = /^Requiere revisión/;
+const causaHTML = (c) => (REVISION.test(c || '') ? `<span class="req-rev">Requiere revisión</span>${esc(c.replace(REVISION, '').replace(/^:\s*/, ''))}` : esc(c));
+const enlaceHash = (e) => (e ? `#/${e.modulo}${e.params ? `?${new URLSearchParams(e.params)}` : ''}` : null);
+
+// Tarjeta de una situación. compacta: para el Resumen (sin casos).
+export function situacionHTML(s, { compacta = false, acciones = '' } = {}) {
+  const href = enlaceHash(s.enlace);
+  return `<article class="situ s-${s.nivel}" data-situ="${esc(s.id)}">
+    <header class="situ-cab">${nivelBadge(s.nivel)}<h3>${esc(s.titulo)}</h3><span class="situ-fuente">${esc(FUENTE_ICONO[s.fuente] || s.fuente)}</span></header>
+    <p class="situ-que">${esc(s.que)}</p>
+    <dl class="situ-det">
+      <div><dt>Posible causa</dt><dd>${causaHTML(s.causa)}</dd></div>
+      <div><dt>Impacto</dt><dd>${esc(s.impacto)}</dd></div>
+      <div><dt>Acción sugerida</dt><dd>${esc(s.accion)}</dd></div>
+    </dl>
+    ${compacta ? '' : s.casos.length ? `<details class="situ-casos"><summary>${s.casos.length} ${s.casos.length === 1 ? 'caso' : 'casos'}</summary><div data-casos></div></details>` : ''}
+    <footer class="situ-pie">${href && compacta ? `<a href="${href}">Ver el detalle</a>` : ''}${acciones}</footer>
+  </article>`;
+}
+// Tabla de casos de una situación: Persona | Qué ocurre | Causa | Impacto | Prioridad | Acción
+export function tablaCasos(cont, casos, { onRow = null } = {}) {
+  const ord = { Inmediata: 0, Alta: 1, Media: 2, Baja: 3 };
+  const conCausa = casos.some((c) => c.causa), conAccion = casos.some((c) => c.accion);
+  tabla(cont, {
+    rows: casos, orden: { key: 'prioridad', dir: 1 }, onRow,
+    cols: [
+      { key: 'persona', label: 'Persona / área', render: (c) => `<span class="nom">${esc(c.persona)}</span>${c.area ? `<span class="tenue bloque">${esc(c.area)}</span>` : ''}` },
+      { key: 'que', label: 'Qué ocurre', clase: 'col-tarea', render: (c) => esc(c.que) },
+      ...(conCausa ? [{ key: 'causa', label: 'Causa', clase: 'col-texto', render: (c) => (c.causa ? causaHTML(c.causa) : '<span class="tenue">—</span>') }] : []),
+      ...(conAccion ? [{ key: 'accion', label: 'Acción sugerida', clase: 'col-texto', render: (c) => esc(c.accion || '') }] : []),
+      { key: 'prioridad', label: 'Prioridad', sort: (c) => ord[c.prioridad] ?? 9, render: (c) => (c.prioridad ? `<span class="prio-t pt-${norm(c.prioridad)}">${esc(c.prioridad)}</span>` : '—') },
+    ],
+  });
+}
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+// ---------- grupos de prioridad de propuestas (Impacto × Esfuerzo) ----------
+export const grupoBadge = (g, GRUPOS) => (g ? `<span class="badge ${GRUPOS[g].clase}">${esc(GRUPOS[g].nombre)}</span>` : '<span class="tenue">Sin evaluar</span>');
+
+// ---------- cajón lateral genérico (formularios) ----------
+export function abrirCajon({ titulo, html, etiqueta = titulo, alCerrar = null }) {
+  document.querySelector('.cajon')?.remove();
+  const el = h(`<aside class="cajon" role="dialog" aria-modal="true" aria-label="${esc(etiqueta)}">
+    <div class="cajon-fondo"></div>
+    <div class="cajon-panel cajon-ancho"><header><h2>${esc(titulo)}</h2><button class="btn-icono cerrar" type="button" aria-label="Cerrar">✕</button></header>${html}</div></aside>`);
+  document.body.appendChild(el);
+  const cerrar = () => { el.remove(); document.removeEventListener('keydown', onKey); alCerrar?.(); };
+  const onKey = (e) => { if (e.key === 'Escape' && !e.target.closest('select')) cerrar(); };
+  document.addEventListener('keydown', onKey);
+  el.querySelector('.cerrar').addEventListener('click', cerrar);
+  el.querySelector('.cajon-fondo').addEventListener('click', cerrar);
+  el.querySelector('.cerrar').focus();
+  return { el, cerrar };
+}

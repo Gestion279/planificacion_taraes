@@ -1,7 +1,7 @@
 // =====================================================================
 // Panel de detalle de una actividad (compartido por los módulos)
 // Muestra datos, ubicación en el Excel e historial de cambios.
-// (Las horas reales se cargan como total semanal por persona, en Personas.)
+// (Las horas reales se cargan como total semanal por persona, en Carga.)
 // =====================================================================
 import * as db from './db.js';
 import { esc, h, horas, fechaLarga, fechaHora, prioBadge } from './ui.js';

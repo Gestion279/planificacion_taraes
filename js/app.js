@@ -4,16 +4,18 @@
 import * as db from './db.js';
 import { esc, rangoSemana, limpiarGraficos, aviso, pedirClave, multiSelect } from './ui.js';
 import { addDays, CTX } from './engine.js';
+import { olvidarSituaciones } from './situaciones.js';
 import * as resumen from './modules/resumen.js';
 import * as planificacion from './modules/planificacion.js';
-import * as personas from './modules/personas.js';
 import * as riesgos from './modules/riesgos.js';
 import * as evolucion from './modules/evolucion.js';
 import * as mejoras from './modules/mejoras.js';
-import * as repetitivas from './modules/repetitivas.js';
 import * as carga from './modules/carga.js';
 
-const MODULOS = { resumen, planificacion, personas, riesgos, evolucion, mejoras, repetitivas, carga };
+const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, carga };
+// Rutas anteriores: Personas se integró en Planificación (detalle del mapa de calor) y en Carga (jornada y horas reales);
+// Tareas repetitivas se integró en Propuestas de mejora. Los enlaces guardados siguen funcionando.
+const RUTAS_ANTERIORES = { personas: 'planificacion', repetitivas: 'mejoras' };
 
 // ---------- estado compartido (una sola fuente de datos para todos los módulos) ----------
 export const app = {
@@ -37,6 +39,10 @@ export const app = {
   _cache: new Map(),
   _completas: new Set(),
   _cacheCambios: new Map(),
+  // Propuestas de mejora registradas (null = la base todavía no tiene la tabla) e historial de cargas
+  propuestas: [],
+  propuestasDisponibles: true,
+  importaciones: [],
 
   // ¿La fila pasa los filtros globales? (actividades, cambios o registros persona-semana)
   pasa(r) {
@@ -149,9 +155,23 @@ export const app = {
 
   // Datos cargados en la aplicación que valen para todas las semanas
   async cargarContexto() {
-    const [riesgos, excepciones] = await Promise.all([db.riesgosEvaluados(), db.excepcionesAuditoria()]);
+    const [riesgos, excepciones, importaciones] = await Promise.all([db.riesgosEvaluados(), db.excepcionesAuditoria(),
+      db.importaciones(1000).catch(() => []), this.cargarPropuestas()]);
     CTX.riesgos = new Map(riesgos.map((x) => [`${x.persona_id}|${x.riesgo_norm}`, { prob: x.prob, impacto: x.impacto }]));
     CTX.excepciones = new Set(excepciones.map((x) => `${x.persona_id}|${x.tarea_norm}|${x.regla}`));
+    this.importaciones = importaciones;
+  },
+  async cargarPropuestas() {
+    try {
+      const ps = await db.propuestas();
+      this.propuestasDisponibles = ps !== null;
+      this.propuestas = ps || [];
+    } catch (e) { console.error(e); this.propuestas = []; }
+  },
+  // Propuestas visibles con los filtros globales de área (las que no tienen área se ven siempre)
+  propuestasVisibles() {
+    const a = this.filtros.areas;
+    return this.propuestas.filter((p) => !a.length || !p.area || a.includes(p.area));
   },
 
   actualizarPersona(personaId, patch) {
@@ -174,7 +194,7 @@ export const app = {
 
   // Se llama después de una carga: recarga la lista de semanas y vacía la caché
   async refrescar(semanaInicio = null) {
-    this._cache.clear(); this._completas.clear(); this._cacheCambios.clear(); CTX.reales.clear();
+    this._cache.clear(); this._completas.clear(); this._cacheCambios.clear(); CTX.reales.clear(); olvidarSituaciones();
     await this.cargarContexto();
     this.semanas = await db.semanas();
     this.areas = await db.areas();
@@ -225,6 +245,7 @@ async function cambiarSemana(id) {
 async function render(opc = {}) {
   const mantenerScroll = opc && opc.mantenerScroll === true;
   const [, ruta = 'resumen', query = ''] = location.hash.match(/^#\/([a-z]+)\??(.*)$/) || [];
+  if (RUTAS_ANTERIORES[ruta]) { history.replaceState(null, '', `#/${RUTAS_ANTERIORES[ruta]}${query ? `?${query}` : ''}`); return render(opc); }
   app.modulo = MODULOS[ruta] ? ruta : 'resumen';
   app.params = Object.fromEntries(new URLSearchParams(query));
   document.querySelectorAll('[data-mod]').forEach((a) => a.setAttribute('aria-current', a.dataset.mod === app.modulo ? 'page' : 'false'));

@@ -2,21 +2,29 @@
 // Motor de análisis — única fuente de cálculo de la aplicación.
 // Los módulos NO calculan indicadores: consumen estas funciones.
 // Todas las funciones reciben actividades normalizadas (ver db.js).
+//
+// Circuito de gestión que alimenta este motor:
+//   planificación → carga por persona y día → situaciones (qué / causa / impacto / acción)
+//   → oportunidades (tareas repetitivas, riesgos persistentes…) → propuestas de mejora → resultado
 // =====================================================================
 
 export const CONFIG = {
   jornada: 44,            // horas semanales de referencia (se mantiene del dashboard anterior)
-  ocupAlta: 110,          // % ocupación que dispara "sobrecarga"
-  ocupCritica: 120,       // % ocupación crítica
-  ocupBaja: 30,           // % por debajo del cual se sospecha subregistro
-  horasDiaMax: 10,        // horas planificadas en un solo día
+  diasHabiles: 5,         // capacidad diaria estimada = jornada semanal / días hábiles
+  ocupAlta: 110,          // % de la capacidad SEMANAL que dispara "sobrecarga"
+  ocupCritica: 120,       // % de la capacidad semanal crítica
+  ocupBaja: 30,           // % de la capacidad semanal por debajo del cual se habla de baja utilización (única definición)
+  diaElevada: 100,        // % de la capacidad DIARIA: por encima, carga elevada
+  diaSobrecarga: 115,     // % de la capacidad diaria: por encima, sobrecarga
+  diaBaja: 50,            // % de la capacidad diaria: por debajo, baja utilización
   horasTareaMax: 8,       // horas de una sola tarea (dato a revisar)
   altaShareMax: 0.75,     // proporción de horas en prioridad Alta
   minTareasRegla: 5,      // mínimo de tareas para aplicar reglas de proporción
   riesgosMax: 5,          // riesgos DISTINTOS declarados por persona en la semana
-  repetitivasMax: 4,      // tareas repetitivas en la semana
   recurrenciaSemanas: 3,  // semanas en las que debe aparecer una tarea para ser "recurrente"
   coberturaMin: 50,       // % de actividades con estado para confiar en el cumplimiento
+  incompletaMin: 5,       // % de actividades incompletas a partir del cual se informa a Gerencia
+  semanasPorMes: 4.33,
 };
 
 // Datos que se cargan en la aplicación (no vienen del Excel). Los completa app.js.
@@ -36,6 +44,7 @@ export function norm(s) {
 const sum = (arr, f = (x) => x) => arr.reduce((a, x) => a + (Number(f(x)) || 0), 0);
 const round1 = (n) => (Math.round(n * 10) / 10).toLocaleString('es-AR'); // para textos: coma decimal
 const pct = (a, b) => (b > 0 ? (a / b) * 100 : null);
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 export function groupBy(arr, keyFn) {
   const m = new Map();
   for (const x of arr) { const k = keyFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
@@ -76,7 +85,7 @@ const ESTADO_SCORE = { Cumplida: 1, 'En curso': 0.5, Pendiente: 0 };
 export const ESTADOS_EXCEL = ['Pendiente', 'En curso', 'Cumplida', 'Cancelada'];
 export const ESTADOS = ['Cumplida', 'En curso', 'Pendiente', 'Cancelada', 'Otro', 'Sin estado'];
 
-// ---------- clave de tarea: ÚNICA definición de "misma tarea" para repetitivas/recurrentes ----------
+// ---------- clave de tarea: ÚNICA definición de "misma tarea" para repetitivas y propuestas ----------
 const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 'en', 'con', 'para', 'por',
   'del', 'al', 'su', 'sus', 'se', 'que', 'lo', 'este', 'esta', 'estos', 'estas', 'sobre', 'e']);
 const SINON = {
@@ -88,6 +97,42 @@ export function claveTarea(texto) {
   const toks = norm(texto).split(' ').filter((w) => w.length > 2 && !STOP.has(w))
     .map((w) => SINON[w] || (w.length > 4 ? w.replace(/(es|s)$/, '') : w));
   return [...new Set(toks)].sort().join(' ');
+}
+const claveDe = (r) => claveTarea(r.tarea) || norm(r.tarea);
+
+// =====================================================================
+// Capacidad y carga diaria (lugar principal: mapa de calor de Planificación)
+// =====================================================================
+export const capacidadDia = (jornada) => (Number(jornada) || CONFIG.jornada) / CONFIG.diasHabiles;
+export const esHabil = (dia) => DIAS.indexOf(dia) < CONFIG.diasHabiles;
+// sin = día hábil sin horas · libre = fin de semana sin horas
+export function nivelDia(horasDia, cap, dia) {
+  if (!horasDia) return esHabil(dia) ? 'sin' : 'libre';
+  const p = (horasDia / cap) * 100;
+  if (p > CONFIG.diaSobrecarga) return 'sobrecarga';
+  if (p > CONFIG.diaElevada) return 'elevada';
+  if (p < CONFIG.diaBaja) return 'baja';
+  return 'normal';
+}
+export const NIVELES_DIA = {
+  sobrecarga: 'Sobrecarga', elevada: 'Carga elevada', normal: 'Carga normal', baja: 'Baja utilización', sin: 'Sin planificación',
+};
+
+// persona → { dias: { Lunes: { horas, rows, nivel } }, capDia, ... }
+export function cargaDiaria(rows) {
+  const out = new Map();
+  for (const [persona, rs] of groupBy(rows, (r) => r.persona)) {
+    const jornada = Number(rs[0].jornada) || CONFIG.jornada;
+    const cap = capacidadDia(jornada);
+    const dias = {};
+    DIAS.forEach((d) => { dias[d] = { horas: 0, rows: [] }; });
+    rs.forEach((r) => { const d = diaDe(r); if (!dias[d]) dias[d] = { horas: 0, rows: [] }; dias[d].horas += r.horas || 0; dias[d].rows.push(r); });
+    Object.entries(dias).forEach(([d, v]) => { v.nivel = d === 'Sin día' ? null : nivelDia(v.horas, cap, d); v.variacion = v.horas ? ((v.horas - cap) / cap) * 100 : null; });
+    const total = sum(rs, (r) => r.horas);
+    out.set(persona, { persona, personaId: rs[0].personaId, area: areasDe(rs).join(', '), areas: areasDe(rs), jornada, capDia: cap, total,
+      ocupacion: pct(total, jornada), dias, rows: rs });
+  }
+  return out;
 }
 
 // =====================================================================
@@ -101,7 +146,7 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
     const conEstado = rs.filter((r) => estadoDe(r) !== 'Sin estado');
     const puntuables = rs.map((r) => ESTADO_SCORE[estadoDe(r)]).filter((v) => v !== undefined);
     const jornada = Number(rs[0].jornada) || CONFIG.jornada;
-    // horas reales: total por persona y semana (se cargan en Personas)
+    // horas reales: total por persona y semana (se cargan en Carga)
     const semanasP = [...new Set(rs.map((r) => r.semana))];
     const semConReal = semanasP.filter((s) => CTX.reales.has(`${s}|${rs[0].personaId}`));
     const realTotal = sum(semConReal, (s) => CTX.reales.get(`${s}|${rs[0].personaId}`));
@@ -119,6 +164,7 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
       actividades: rs.length / nSem,
       horas: horas / nSem,
       jornada,
+      capDia: capacidadDia(jornada),
       ocupacion: pct(horas / nSem, jornada),
       semanas: nSem,
       cumplimiento: puntuables.length ? (sum(puntuables) / puntuables.length) * 100 : null,
@@ -130,25 +176,33 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
       desvioPct: semConReal.length && planConReal > 0 ? ((realTotal - planConReal) / planConReal) * 100 : null,
       coberturaReal: pct(semConReal.length, semanasP.length),
       prio, prioH, horasDia,
+      sinHoras: rs.filter((r) => !r.horas).length,
       conRiesgo: rs.filter(tieneRiesgo).length,
       riesgosDistintos: new Set(rs.filter(tieneRiesgo).map((r) => norm(r.riesgos))).size,
       dias: Object.keys(horasDia).filter((d) => d !== 'Sin día').length,
       rows: rs,
     });
   }
-  return out.sort((a, b) => b.horas - a.horas);
+  // orden alfabético: el análisis es de situaciones de trabajo, no un ranking de personas
+  return out.sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
 }
 
 // =====================================================================
-// Indicadores ejecutivos de una semana (lugar principal: Resumen)
+// Indicadores de una semana
 // =====================================================================
 export function kpisSemana(rows) {
   const puntuables = rows.map((r) => ESTADO_SCORE[estadoDe(r)]).filter((v) => v !== undefined);
   const al = alertas(rows);
+  const stats = statsPersonas(rows);
+  const capacidad = sum(stats, (p) => p.jornada);
   return {
     actividades: rows.length,
     personas: new Set(rows.map((r) => r.persona)).size,
     horas: sum(rows, (r) => r.horas),
+    capacidad,
+    ocupacion: pct(sum(rows, (r) => r.horas), capacidad),
+    sobrecarga: stats.filter((p) => p.ocupacion > CONFIG.ocupAlta).length,
+    bajaUtilizacion: stats.filter((p) => p.horas > 0 && p.ocupacion < CONFIG.ocupBaja).length,
     cumplimiento: puntuables.length ? (sum(puntuables) / puntuables.length) * 100 : null,
     cobertura: pct(rows.filter((r) => estadoDe(r) !== 'Sin estado').length, rows.length),
     alertasCriticas: al.filter((a) => a.nivel === 'critica').length,
@@ -157,75 +211,114 @@ export function kpisSemana(rows) {
 }
 
 // =====================================================================
-// Alertas del sistema (detectadas automáticamente — NO son riesgos declarados)
-// Reglas tomadas de calcPersonRisk (Semanal) y del Histórico, separadas por regla.
+// Situaciones por persona (detectadas automáticamente — NO son riesgos declarados)
+// Cada una se presenta como: QUÉ OCURRE · POSIBLE CAUSA · IMPACTO · ACCIÓN SUGERIDA.
+// Si los datos no permiten determinar la causa, se indica "Requiere revisión": no se inventa.
 // =====================================================================
+export const REQUIERE_REVISION = 'Requiere revisión: los datos cargados no permiten determinar la causa.';
 export const REGLAS_ALERTA = {
-  sobrecarga: 'Sobrecarga',
-  subregistro: 'Posible subregistro',
-  dia_saturado: 'Día saturado',
+  sobrecarga: 'Sobrecarga semanal',
+  subregistro: 'Baja utilización',
+  dia_saturado: 'Día con sobrecarga',
   concentracion_dia: 'Concentración en pocos días',
-  prioridad_alta_excesiva: 'Prioridad alta excesiva',
+  prioridad_alta_excesiva: 'Prioridad Alta excesiva',
   alta_sin_tiempo: 'Tareas críticas con poco tiempo',
-  incumplimiento: 'Incumplimientos',
+  incumplimiento: 'Tareas pendientes',
   acumulacion_riesgos: 'Acumulación de riesgos',
-  repetitividad: 'Alta repetitividad',
 };
+export const PRIORIDAD_NIVEL = { critica: 'Alta', advertencia: 'Media', info: 'Baja' };
+
+// Tareas que explican la carga de un conjunto de filas (las de más horas primero)
+function tareasQueExplican(rs, n = 3) {
+  return [...rs].filter((r) => r.horas > 0).sort((a, b) => b.horas - a.horas).slice(0, n)
+    .map((r) => `${recortar(r.tarea || 'Sin descripción', 50)} (${round1(r.horas)} h)`).join(', ');
+}
 
 export function alertas(rows) {
   const out = [];
-  const add = (regla, nivel, p, detalle, porque) =>
-    out.push({ regla, nombre: REGLAS_ALERTA[regla], nivel, persona: p.persona, area: p.area, detalle, porque });
+  const add = (regla, nivel, p, { que, causa = REQUIERE_REVISION, impacto, accion, dia = null }) =>
+    out.push({ regla, nombre: REGLAS_ALERTA[regla], nivel, prioridad: PRIORIDAD_NIVEL[nivel], persona: p.persona, personaId: p.personaId, area: p.area,
+      que, causa, impacto, accion, dia, detalle: que, porque: impacto });
+  const carga = cargaDiaria(rows);
 
   for (const p of statsPersonas(rows)) {
     const n = p.rows.length;
-    if (p.ocupacion > CONFIG.ocupCritica)
-      add('sobrecarga', 'critica', p, `${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}% de su jornada de ${round1(p.jornada)} h)`,
-        'La carga supera la jornada de referencia: riesgo de incumplimiento y desgaste.');
-    else if (p.ocupacion > CONFIG.ocupAlta)
-      add('sobrecarga', 'advertencia', p, `${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}%)`,
-        'La carga está por encima del umbral recomendado.');
-    else if (p.horas > 0 && p.ocupacion < CONFIG.ocupBaja)
-      add('subregistro', 'info', p, `Solo ${round1(p.horas)} h planificadas (${Math.round(p.ocupacion)}%)`,
-        'Puede faltar planificar actividades o completar tiempos.');
+    const cd = carga.get(p.persona);
+    const diasSobre = Object.entries(cd.dias).filter(([, v]) => v.nivel === 'sobrecarga');
+    const diasLibres = Object.entries(cd.dias).filter(([d, v]) => esHabil(d) && (v.nivel === 'baja' || v.nivel === 'sin'));
+    const hMediaBaja = p.prioH.Media + p.prioH.Baja;
 
-    for (const [dia, h] of Object.entries(p.horasDia)) {
-      if (dia !== 'Sin día' && h > CONFIG.horasDiaMax)
-        add('dia_saturado', 'advertencia', p, `${dia}: ${round1(h)} h planificadas`,
-          `Un día con más de ${CONFIG.horasDiaMax} h es difícil de cumplir.`);
+    if (p.ocupacion > CONFIG.ocupAlta) {
+      const causas = [];
+      if (diasSobre.length) causas.push(`concentración de horas en ${diasSobre.map(([d]) => d.toLowerCase()).join(', ')}`);
+      const largas = p.rows.filter((r) => (r.horas || 0) > CONFIG.horasTareaMax);
+      if (largas.length) causas.push(`${plural(largas.length, 'tarea', 'tareas')} de más de ${CONFIG.horasTareaMax} h`);
+      const hAltaMedia = p.prioH.Alta + p.prioH.Media;
+      if (p.horas > 0 && hAltaMedia / p.horas >= 0.8) causas.push(`el ${Math.round((hAltaMedia / p.horas) * 100)}% de las horas es de prioridad Alta o Media`);
+      add('sobrecarga', p.ocupacion > CONFIG.ocupCritica ? 'critica' : 'advertencia', p, {
+        que: `${round1(p.horas)} h planificadas sobre una capacidad estimada de ${round1(p.jornada)} h (${Math.round(p.ocupacion)}%).`,
+        causa: causas.length ? `${causas.join('; ')}.`.replace(/^./, (c) => c.toUpperCase()) : REQUIERE_REVISION,
+        impacto: 'Riesgo de incumplimiento o necesidad de reprogramación.',
+        accion: hMediaBaja > 0 ? `Evaluar redistribuir o reprogramar tareas de prioridad Media o Baja (${round1(hMediaBaja)} h).` : 'Revisar alcance y plazos de las tareas de prioridad Alta.',
+      });
+    } else if (p.horas > 0 && p.ocupacion < CONFIG.ocupBaja) {
+      add('subregistro', 'info', p, {
+        que: `${round1(p.horas)} h planificadas sobre una capacidad estimada de ${round1(p.jornada)} h (${Math.round(p.ocupacion)}%).`,
+        causa: p.sinHoras ? `${plural(p.sinHoras, 'actividad no tiene', 'actividades no tienen')} tiempo cargado.` : REQUIERE_REVISION,
+        impacto: 'La carga informada puede no reflejar el trabajo real, o existe capacidad disponible.',
+        accion: 'Confirmar si la planificación está completa; si hay capacidad libre, considerarla al redistribuir.',
+      });
+    }
+
+    for (const [dia, v] of diasSobre) {
+      add('dia_saturado', 'advertencia', p, {
+        dia,
+        que: `${dia}: ${round1(v.horas)} h planificadas sobre ${round1(cd.capDia)} h de capacidad diaria (+${Math.round(v.variacion)}%).`,
+        causa: `Tareas de mayor duración: ${tareasQueExplican(v.rows)}.`,
+        impacto: 'Es difícil completar todo lo planificado ese día.',
+        accion: diasLibres.length ? `Reprogramar tareas de prioridad Media o Baja hacia ${diasLibres.slice(0, 2).map(([d]) => d.toLowerCase()).join(' o ')}, con menos carga.` : 'Revisar si alguna tarea puede pasar a otra persona o a la semana siguiente.',
+      });
     }
     if (p.dias <= 1 && n > 4)
-      add('concentracion_dia', 'advertencia', p, `${n} tareas en ${p.dias} día`, 'Toda la semana depende de un solo día.');
+      add('concentracion_dia', 'advertencia', p, {
+        que: `${n} tareas concentradas en ${p.dias} día.`, causa: REQUIERE_REVISION,
+        impacto: 'Toda la semana depende de un solo día.', accion: 'Confirmar las fechas cargadas y distribuir las tareas en la semana.',
+      });
 
     const horasAlta = p.prioH.Alta;
     if (n >= CONFIG.minTareasRegla && p.horas > 0 && horasAlta / p.horas > CONFIG.altaShareMax)
-      add('prioridad_alta_excesiva', 'info', p, `${Math.round((horasAlta / p.horas) * 100)}% de las horas en prioridad Alta`,
-        'Si casi todo es prioritario, la prioridad deja de ordenar el trabajo.');
+      add('prioridad_alta_excesiva', 'info', p, {
+        que: `El ${Math.round((horasAlta / p.horas) * 100)}% de las horas está marcado como prioridad Alta.`, causa: REQUIERE_REVISION,
+        impacto: 'Si casi todo es prioritario, la prioridad deja de ordenar el trabajo.', accion: 'Acordar con el área un criterio común para la prioridad Alta.',
+      });
 
-    // solo tareas con tiempo cargado: la falta de tiempo es un tema de Auditoría, no de planificación
+    // solo tareas con tiempo cargado: la falta de tiempo es un tema de Auditoría
     const altas = p.rows.filter((r) => r.prioridad === 'Alta' && r.horas > 0);
     const hAlta = sum(altas, (r) => r.horas);
     if (altas.length >= 3 && hAlta / altas.length < 0.5)
-      add('alta_sin_tiempo', 'info', p, `${altas.length} tareas Alta con ${round1(hAlta / altas.length)} h promedio`,
-        'Las tareas críticas con muy poco tiempo asignado suelen estar subestimadas.');
+      add('alta_sin_tiempo', 'info', p, {
+        que: `${altas.length} tareas de prioridad Alta con ${round1(hAlta / altas.length)} h promedio.`, causa: REQUIERE_REVISION,
+        impacto: 'Las tareas críticas con muy poco tiempo asignado suelen estar subestimadas.', accion: 'Revisar la estimación de tiempo de esas tareas.',
+      });
 
     if (p.pendientes.length) {
       const criticas = p.pendientes.filter((r) => r.prioridad === 'Alta').length;
-      add('incumplimiento', criticas ? 'critica' : 'advertencia', p,
-        `${p.pendientes.length} ${p.pendientes.length === 1 ? 'tarea pendiente o no cumplida' : 'tareas pendientes o no cumplidas'}${criticas ? `, ${criticas} de prioridad Alta` : ''}`,
-        'El estado informado indica que la tarea no se cumplió.');
+      const conRiesgo = p.pendientes.filter(tieneRiesgo);
+      add('incumplimiento', criticas ? 'critica' : 'advertencia', p, {
+        que: `${plural(p.pendientes.length, 'tarea figura', 'tareas figuran')} como pendiente o no cumplida${criticas ? ` (${criticas} de prioridad Alta)` : ''}.`,
+        causa: conRiesgo.length ? `Riesgo declarado: ${recortar(conRiesgo[0].riesgos, 90)}${conRiesgo.length > 1 ? ` y ${conRiesgo.length - 1} más` : ''}.` : REQUIERE_REVISION,
+        impacto: 'Compromisos de la semana sin terminar: pueden trasladarse a la semana siguiente.',
+        accion: criticas ? 'Confirmar nueva fecha y recursos para las tareas de prioridad Alta.' : 'Confirmar si se reprograman o se cancelan.',
+      });
     }
     if (p.riesgosDistintos > CONFIG.riesgosMax)
-      add('acumulacion_riesgos', 'advertencia', p, `${p.riesgosDistintos} riesgos distintos declarados en ${p.conRiesgo} actividades`,
-        'Muchos riesgos simultáneos aumentan la probabilidad de desvíos.');
-
-    const rep = repetitivasSemana(p.rows);
-    if (rep.length > CONFIG.repetitivasMax)
-      add('repetitividad', 'info', p, `${rep.length} tareas se repiten en varios días`,
-        'Tareas que se repiten todos los días son candidatas a estandarizar o automatizar.');
+      add('acumulacion_riesgos', 'advertencia', p, {
+        que: `${p.riesgosDistintos} riesgos distintos declarados en ${p.conRiesgo} actividades.`, causa: REQUIERE_REVISION,
+        impacto: 'Muchos riesgos simultáneos aumentan la probabilidad de desvíos.', accion: 'Evaluar probabilidad e impacto en la Matriz de riesgo.',
+      });
   }
   const orden = { critica: 0, advertencia: 1, info: 2 };
-  return out.sort((a, b) => orden[a.nivel] - orden[b.nivel] || a.persona.localeCompare(b.persona));
+  return out.sort((a, b) => orden[a.nivel] - orden[b.nivel] || a.persona.localeCompare(b.persona, 'es'));
 }
 
 // =====================================================================
@@ -262,41 +355,124 @@ export function auditoria(rows, semanaInicio) {
 }
 
 // =====================================================================
-// Repetitivas (en la semana) y recurrentes (en el período) — misma clave
+// Tareas repetitivas — ÚNICA definición (antes había tres distintas).
+// Una tarea es repetitiva si cumple al menos un criterio:
+//   · frecuencia: la misma persona la planifica más de una vez en una misma semana
+//   · recurrencia: aparece en CONFIG.recurrenciaSemanas semanas o más
+//   · varias personas: la planifican 2 o más personas
+// Lugar principal: Propuestas de mejora (como oportunidad). Planificación solo marca ↻.
 // =====================================================================
 export function repetitivasSemana(rows) {
   const out = [];
-  for (const [k, rs] of groupBy(rows.filter((r) => r.tarea), (r) => `${r.persona}|${claveTarea(r.tarea)}`)) {
-    const dias = new Set(rs.map(diaDe));
-    if (dias.size >= 2) out.push({ persona: rs[0].persona, tarea: rs[0].tarea, clave: k.split('|')[1], dias: dias.size, veces: rs.length, horas: sum(rs, (r) => r.horas) });
+  for (const [k, rs] of groupBy(rows.filter((r) => r.tarea), (r) => `${r.persona}|${claveDe(r)}`)) {
+    if (rs.length < 2) continue;
+    out.push({ persona: rs[0].persona, tarea: rs[0].tarea, clave: k.split('|').slice(1).join('|'), dias: new Set(rs.map(diaDe)).size, veces: rs.length, horas: sum(rs, (r) => r.horas) });
   }
   return out.sort((a, b) => b.horas - a.horas);
 }
 
-export function recurrentesPeriodo(rows, minSemanas = CONFIG.recurrenciaSemanas) {
+export function analisisRepetitivas(rows, nSemanas = 1) {
+  const semanas = Math.max(1, nSemanas);
   const out = [];
-  for (const [clave, rs] of groupBy(rows.filter((r) => r.tarea), (r) => claveTarea(r.tarea))) {
+  for (const [clave, ts] of groupBy(rows.filter((r) => r.tarea), claveDe)) {
     if (!clave) continue;
-    const semanas = new Set(rs.map((r) => r.semana));
-    if (semanas.size < minSemanas) continue;
-    const personas = [...new Set(rs.map((r) => r.persona))];
-    const etiqueta = [...groupBy(rs, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
-    out.push({ clave, tarea: etiqueta, semanas: semanas.size, personas, veces: rs.length,
-      horasSemana: sum(rs, (r) => r.horas) / semanas.size, categoria: clasificar(etiqueta) });
+    const porPersonaSemana = groupBy(ts, (r) => `${r.persona}|${r.semana}`);
+    const semSet = new Set(ts.map((r) => r.semana));
+    const personas = [...new Set(ts.map((r) => r.persona))].sort((a, b) => a.localeCompare(b, 'es'));
+    const criterios = [];
+    const maxSemana = Math.max(...[...porPersonaSemana.values()].map((x) => x.length));
+    if (maxSemana > 1) criterios.push('frecuencia');
+    if (semSet.size >= CONFIG.recurrenciaSemanas) criterios.push('recurrencia');
+    if (personas.length >= 2) criterios.push('personas');
+    if (!criterios.length) continue;
+    const conHoras = ts.filter((r) => r.horas > 0);
+    const horas = sum(conHoras, (r) => r.horas);
+    const tarea = [...groupBy(ts, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const categoria = clasificar(tarea, maxSemana > 1);
+    const horasSemana = horas / semanas;
+    out.push({
+      clave, tarea, personas, areas: areasDe(ts), veces: ts.length, semanas: semSet.size, criterios,
+      vecesSemana: ts.length / semanas,
+      horas, horasSemana,
+      horasPorVez: conHoras.length ? horas / conHoras.length : null,
+      // potencial BRUTO: horas que hoy consume la tarea. Es un dato, no un ahorro estimado.
+      horasMes: horas > 0 ? horasSemana * CONFIG.semanasPorMes : null,
+      sinHoras: ts.length - conHoras.length,
+      categoria, tipoSugerido: tipoSugerido(tarea, categoria, personas.length),
+      rows: ts,
+    });
   }
-  return out.sort((a, b) => b.horasSemana - a.horasSemana);
+  return out.sort((a, b) => (b.horasMes || 0) - (a.horasMes || 0) || b.veces - a.veces);
+}
+export const CRITERIOS_REP = { frecuencia: 'Varias veces por semana', recurrencia: 'Se repite entre semanas', personas: 'La hacen varias personas' };
+
+// Tareas similares hechas por distintas personas (misma clave o ≥ 2 palabras y ≥ 60% en común)
+export function tareasEntrePersonas(rows, nSemanas = 1) {
+  const semanas = Math.max(1, nSemanas);
+  const unicas = [...groupBy(rows.filter((r) => r.tarea), claveDe)].map(([clave, rs]) => ({
+    clave, rs, personas: new Set(rs.map((r) => r.persona)), veces: rs.length, horasSemana: sum(rs, (r) => r.horas) / semanas,
+    tarea: [...groupBy(rs, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0],
+  }));
+  const n = unicas.length, padre = unicas.map((_, i) => i);
+  const raiz = (x) => { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; };
+  const toks = unicas.map((t) => new Set(t.clave.split(' ').filter(Boolean)));
+  for (let i = 0; i < n; i++) {
+    if (!toks[i].size) continue;
+    for (let j = i + 1; j < n; j++) {
+      if (!toks[j].size) continue;
+      let inter = 0; for (const w of toks[i]) if (toks[j].has(w)) inter++;
+      if (inter >= 2 && inter / Math.max(toks[i].size, toks[j].size) >= 0.6) { const a = raiz(i), b = raiz(j); if (a !== b) padre[a] = b; }
+    }
+  }
+  const grupos = new Map();
+  unicas.forEach((t, i) => { const r = raiz(i); if (!grupos.has(r)) grupos.set(r, []); grupos.get(r).push(t); });
+  return [...grupos.values()].map((ts) => {
+    const personas = [...new Set(ts.flatMap((t) => [...t.personas]))].sort((a, b) => a.localeCompare(b, 'es'));
+    const principal = [...ts].sort((a, b) => b.veces - a.veces)[0];
+    const variantes = ts.length;
+    return { tarea: principal.tarea, clave: principal.clave, personas, variantes, veces: sum(ts, (t) => t.veces), horasSemana: sum(ts, (t) => t.horasSemana),
+      horasMes: sum(ts, (t) => t.horasSemana) * CONFIG.semanasPorMes };
+  }).filter((g) => g.personas.length >= 2 && g.variantes >= 2).sort((a, b) => b.horasSemana - a.horasSemana || b.veces - a.veces);
 }
 
-// Riesgos declarados que se repiten entre semanas
-export function riesgosPersistentes(rows) {
-  const out = [];
-  for (const [k, rs] of groupBy(rows.filter(tieneRiesgo), (r) => norm(r.riesgos))) {
-    const semanas = [...new Set(rs.map((r) => r.semana))].sort();
-    if (semanas.length < 2) continue;
-    out.push({ riesgo: rs[0].riesgos, semanas: semanas.length, desde: semanas[0], hasta: semanas[semanas.length - 1],
-      personas: [...new Set(rs.map((r) => r.persona))], veces: rs.length });
+// =====================================================================
+// Clasificación por el texto de la tarea (de "Propuestas de mejoras" del dashboard anterior).
+// Se usa SOLO para sugerir un tipo de mejora; la decisión la toma quien evalúa la propuesta.
+// =====================================================================
+const CATEGORIAS = [
+  ['Automatización', ['automatiz', 'rpa', 'n8n', 'macro', 'script', 'power query', 'power automate', 'bot ']],
+  ['Control', ['control', 'revisar', 'revision', 'verificar', 'auditor', 'cheque', 'validar', 'certificad', 'rendicion', 'conciliacion']],
+  ['Comunicación', ['reunion', 'llamada', 'correo', 'mail', 'email', 'comunicar', 'atencion de consulta', 'consulta']],
+  ['Documentación', ['document', 'archivo', 'expediente', 'planilla', 'formulario', 'escane', 'digitaliz', 'completar']],
+  ['Analítica', ['analiz', 'analisis', 'indicador', 'kpi', 'reporte', 'informe', 'dashboard', 'tablero', 'estadistic', 'proyeccion', 'presupuesto']],
+  ['Estratégica', ['estrateg', 'planificacion', 'plan anual', 'proyecto', 'decisio', 'roadmap', 'negociacion']],
+  ['Creativa', ['disen', 'creativ', 'idear', 'contenido', 'campana', 'propuesta']],
+  ['Gestión', ['gestion', 'administrar', 'tramitar', 'seguimiento', 'coordinacion', 'logistic', 'coordinar']],
+  ['Administrativa', ['factura', 'pago', 'rrhh', 'recursos humanos', 'sueldo', 'caja', 'viatico', 'compra', 'proveedor']],
+];
+export function clasificar(texto, repetida = false) {
+  const n = norm(texto);
+  for (const [cat, kws] of CATEGORIAS) if (kws.some((k) => n.includes(k))) return cat;
+  return repetida ? 'Repetitiva' : 'Operativa';
+}
+const MANUAL = ['copiar', 'pegar', 'descargar', 'consolidar', 'carga manual', 'tipear', 'digitar', 'planilla', 'excel'];
+export function tipoSugerido(texto, categoria, nPersonas = 1) {
+  const n = norm(texto);
+  if (MANUAL.some((k) => n.includes(k)) || ['Automatización', 'Documentación', 'Administrativa'].includes(categoria)) return 'Automatizar';
+  if (nPersonas >= 3) return 'Estandarizar';
+  if (categoria === 'Analítica') return 'Automatizar';
+  if (categoria === 'Control') return 'Simplificar';
+  if (categoria === 'Comunicación' || nPersonas >= 2) return 'Estandarizar';
+  return null; // sin evidencia suficiente: lo define quien evalúa
+}
+// Horas de la semana por tipo de tarea (¿en qué se va el tiempo?)
+export function horasPorCategoria(rows, nSemanas = 1) {
+  const out = {};
+  for (const [, rs] of groupBy(rows.filter((r) => r.tarea), claveDe)) {
+    const t = rs[0].tarea; const rep = [...groupBy(rs, (r) => `${r.persona}|${r.semana}`).values()].some((x) => x.length > 1);
+    const c = clasificar(t, rep); out[c] = (out[c] || 0) + sum(rs, (r) => r.horas) / Math.max(1, nSemanas);
   }
-  return out.sort((a, b) => b.semanas - a.semanas || b.veces - a.veces);
+  return out;
 }
 
 // =====================================================================
@@ -309,34 +485,34 @@ const MATRIZ = {
   alto: { bajo: 'alto', moderado: 'alto', alto: 'crítico' },
 };
 export const nivelRiesgo = (prob, impacto) => (prob && impacto ? MATRIZ[prob][impacto] : null);
+// Prioridad de tratamiento según el nivel de riesgo
+export const PRIORIDAD_RIESGO = { 'crítico': 'Inmediata', alto: 'Alta', moderado: 'Media', bajo: 'Baja' };
 export const claveRiesgo = (personaId, riesgo) => `${personaId}|${norm(riesgo)}`;
 // La evaluación se guarda por persona + texto del riesgo: se hereda en todas las semanas
 export const evaluacionDe = (r) => CTX.riesgos.get(claveRiesgo(r.personaId, r.riesgos)) || {};
 export const nivelDe = (r) => { const e = evaluacionDe(r); return nivelRiesgo(e.prob, e.impacto); };
 
-// =====================================================================
-// Serie semanal para Evolución
-// =====================================================================
-export function serieSemanal(rows, cambios, semanas) {
-  const porSemana = groupBy(rows, (r) => r.semana);
-  const cambiosPorSemana = groupBy(cambios || [], (c) => c.semana);
-  return semanas.map((s) => {
-    const rs = porSemana.get(s) || [];
-    const k = kpisSemana(rs);
-    const cs = cambiosPorSemana.get(s) || [];
-    const personasReal = [...new Set(rs.map((r) => r.personaId))].filter((id) => CTX.reales.has(`${s}|${id}`));
-    const real = sum(personasReal, (id) => CTX.reales.get(`${s}|${id}`));
-    const plan = sum(rs.filter((r) => personasReal.includes(r.personaId)), (r) => r.horas);
-    return {
-      semana: s, ...k,
-      riesgos: rs.filter(tieneRiesgo).length,
-      horasReales: personasReal.length ? real : null,
-      desvioPct: personasReal.length && plan > 0 ? ((real - plan) / plan) * 100 : null,
-      agregadas: cs.filter((c) => c.tipo === 'alta').length,
-      modificadas: new Set(cs.filter((c) => c.tipo === 'modificacion' && c.origen === 'excel').map((c) => c.actividadId)).size,
-      retiradas: cs.filter((c) => c.tipo === 'retiro').length,
-    };
-  });
+// Riesgos declarados que se repiten entre semanas
+export function riesgosPersistentes(rows) {
+  const out = [];
+  for (const [, rs] of groupBy(rows.filter(tieneRiesgo), (r) => norm(r.riesgos))) {
+    const semanas = [...new Set(rs.map((r) => r.semana))].sort();
+    if (semanas.length < 2) continue;
+    out.push({ riesgo: rs[0].riesgos, semanas: semanas.length, desde: semanas[0], hasta: semanas[semanas.length - 1],
+      personas: [...new Set(rs.map((r) => r.persona))], veces: rs.length });
+  }
+  return out.sort((a, b) => b.semanas - a.semanas || b.veces - a.veces);
+}
+
+// Tareas que siguen abiertas (Pendiente o En curso) en varias semanas, hasta la semana indicada
+export function tareasAbiertas(rows, hasta) {
+  const out = [];
+  for (const [, rs] of groupBy(rows.filter((r) => r.tarea && ['Pendiente', 'En curso'].includes(estadoDe(r))), (r) => `${r.persona}|${claveDe(r)}`)) {
+    const semanas = [...new Set(rs.map((r) => r.semana))].sort();
+    if (semanas.length < 2 || semanas.at(-1) !== hasta) continue;
+    out.push({ persona: rs[0].persona, area: rs[0].area, tarea: rs.at(-1).tarea, semanas: semanas.length, desde: semanas[0], prioridad: rs.at(-1).prioridad });
+  }
+  return out.sort((a, b) => b.semanas - a.semanas);
 }
 
 // =====================================================================
@@ -358,277 +534,289 @@ export function coberturaCarga(filasSemana, filasPrevias) {
   return { habituales: habituales.size, cargaron: actuales.size, faltan };
 }
 
-// =====================================================================
-// Clasificación de actividades (de "Propuestas de mejoras")
-// =====================================================================
-// Reglas tomadas de la hoja "Propuestas de Mejoras" del dashboard anterior.
-const CATEGORIAS = [
-  ['Automatización', ['automatiz', 'rpa', 'n8n', 'macro', 'script', 'power query', 'power automate', 'bot ']],
-  ['Control', ['control', 'revisar', 'revision', 'verificar', 'auditor', 'cheque', 'validar', 'certificad', 'rendicion', 'conciliacion']],
-  ['Comunicación', ['reunion', 'llamada', 'correo', 'mail', 'email', 'comunicar', 'atencion de consulta', 'consulta']],
-  ['Documentación', ['document', 'archivo', 'expediente', 'planilla', 'formulario', 'escane', 'digitaliz', 'completar']],
-  ['Analítica', ['analiz', 'analisis', 'indicador', 'kpi', 'reporte', 'informe', 'dashboard', 'tablero', 'estadistic', 'proyeccion', 'presupuesto']],
-  ['Estratégica', ['estrateg', 'planificacion', 'plan anual', 'proyecto', 'decisio', 'roadmap', 'negociacion']],
-  ['Creativa', ['disen', 'creativ', 'idear', 'contenido', 'campana', 'propuesta']],
-  ['Gestión', ['gestion', 'administrar', 'tramitar', 'seguimiento', 'coordinacion', 'logistic', 'coordinar']],
-  ['Administrativa', ['factura', 'pago', 'rrhh', 'recursos humanos', 'sueldo', 'caja', 'viatico', 'compra', 'proveedor']],
-];
-const AUTOMATIZABLE = new Set(['Automatización', 'Repetitiva', 'Documentación', 'Administrativa', 'Control', 'Analítica']);
-export function clasificar(texto, repetida = false) {
-  const n = norm(texto);
-  for (const [cat, kws] of CATEGORIAS) if (kws.some((k) => n.includes(k))) return cat;
-  return repetida ? 'Repetitiva' : 'Operativa';
-}
-
-// =====================================================================
-// Propuestas de mejora (hoja del dashboard anterior, sobre el período filtrado)
-// =====================================================================
-export const MEJORAS = { factorRecuperable: 0.6, umbralAutomatizable: 60 };
-const AUTO_BASE = { 'Automatización': 90, 'Repetitiva': 85, 'Documentación': 80, 'Administrativa': 75, 'Control': 70,
-  'Comunicación': 55, 'Gestión': 50, 'Operativa': 45, 'Analítica': 35, 'Creativa': 25, 'Estratégica': 15 };
-const AUTO_SUBE = ['excel', 'planilla', 'copiar', 'pegar', 'descargar', 'consolidar', 'completar formulario', 'carga manual', 'copiar dato', 'tipear', 'digitar', 'plantilla'];
-const AUTO_BAJA = ['decisio', 'negociacion', 'estrateg', 'roadmap', 'liderar', 'disenar estrategia'];
-export const VALOR_POR_CATEGORIA = { 'Estratégica': 'Muy alto', 'Analítica': 'Alto', 'Creativa': 'Alto', 'Automatización': 'Alto',
-  'Gestión': 'Medio', 'Comunicación': 'Medio', 'Control': 'Medio', 'Operativa': 'Medio',
-  'Documentación': 'Bajo', 'Administrativa': 'Bajo', 'Repetitiva': 'Bajo' };
-export const NIVELES_VALOR = ['Bajo', 'Medio', 'Alto', 'Muy alto'];
-
-export function automatizacion(texto, categoria) {
-  const n = norm(texto);
-  let score = AUTO_BASE[categoria] ?? 40;
-  if (AUTO_SUBE.some((k) => n.includes(k))) score = Math.max(score, 90);
-  if (AUTO_BAJA.some((k) => n.includes(k))) score = Math.min(score, 20);
-  const nivel = score >= 80 ? 'Muy alto' : score >= 60 ? 'Alto' : score >= 40 ? 'Medio' : score >= 20 ? 'Bajo' : 'Nulo';
-  return { score, nivel };
-}
-export function herramientaPara(texto, categoria) {
-  const n = norm(texto);
-  if (/correo|mail|consulta|comunicar/.test(n)) return 'ChatGPT';
-  if (/estrateg|redact|propuesta|contenido|disen/.test(n)) return 'Claude';
-  if (/reporte|informe|indicador|dashboard|tablero|kpi/.test(n)) return 'Power BI';
-  if (/planilla|excel|consolidar|copiar dato/.test(n)) return 'Power Query';
-  if (/carga manual|descarga|automatiz|rpa/.test(n)) return 'n8n';
-  if (/analisis|analizar|proyeccion|datos masivos/.test(n)) return 'Python';
-  if (categoria === 'Documentación' || categoria === 'Administrativa') return 'Excel';
-  if (categoria === 'Control') return 'Power Query';
-  if (categoria === 'Gestión') return 'ChatGPT';
-  return 'Otras';
-}
-export function recomendacionPara(texto, herramienta, nivel) {
-  const n = norm(texto);
-  if (n.includes('planilla')) return 'Usar Power Query para automatizar la actualización.';
-  if (n.includes('consulta')) return 'Crear un asistente para responder las consultas frecuentes.';
-  if (n.includes('buscar informacion')) return 'Armar una base documental con IA para búsquedas rápidas.';
-  if (n.includes('reporte') || n.includes('informe')) return 'Automatizar la generación con Power BI.';
-  if (n.includes('control document')) return 'Digitalizar y validar documentos con OCR e IA.';
-  if (n.includes('carga manual')) return 'Automatizar la carga con n8n.';
-  if (n.includes('consolidar')) return 'Crear un flujo automático de consolidación de datos.';
-  const conHerr = herramienta && herramienta !== 'Otras';
-  if (nivel === 'Muy alto' || nivel === 'Alto') return conHerr ? `Evaluar la automatización con ${herramienta}.` : 'Evaluar si se puede automatizar o delegar.';
-  if (nivel === 'Medio') return conHerr ? `Estandarizar el proceso con apoyo de ${herramienta}.` : 'Estandarizar el proceso con una plantilla o procedimiento.';
-  return 'Mantener el enfoque actual: requiere criterio y decisión humana.';
-}
-
-// Tareas únicas del período (misma clave de tarea = misma actividad), con su evaluación
-export function tareasUnicas(rows, nSemanas = 1) {
-  const m = new Map();
-  for (const r of rows) {
-    if (!r.tarea) continue;
-    const k = claveTarea(r.tarea) || norm(r.tarea);
-    if (!m.has(k)) m.set(k, { clave: k, textos: new Map(), personas: new Set(), veces: 0, horas: 0, porPersonaSemana: new Map() });
-    const e = m.get(k);
-    e.textos.set(r.tarea, (e.textos.get(r.tarea) || 0) + 1);
-    e.personas.add(r.persona); e.veces++; e.horas += r.horas || 0;
-    const ps = `${r.persona}|${r.semana}`; e.porPersonaSemana.set(ps, (e.porPersonaSemana.get(ps) || 0) + 1);
-  }
-  const semanas = Math.max(1, nSemanas);
-  return [...m.values()].map((e) => {
-    const tarea = [...e.textos].sort((a, b) => b[1] - a[1])[0][0];
-    const repetida = [...e.porPersonaSemana.values()].some((v) => v > 1);
-    const categoria = clasificar(tarea, repetida);
-    const auto = automatizacion(tarea, categoria);
-    const herramienta = herramientaPara(tarea, categoria);
-    return { clave: e.clave, tarea, personas: [...e.personas], veces: e.veces, horas: e.horas, horasSemana: e.horas / semanas,
-      repetida, categoria, auto, valor: VALOR_POR_CATEGORIA[categoria] || 'Medio', herramienta,
-      recomendacion: recomendacionPara(tarea, herramienta, auto.nivel),
-      recuperableSemana: (e.horas / semanas) * (auto.score / 100) * MEJORAS.factorRecuperable };
+// Áreas cuya PRIMERA carga de la semana llegó después del lunes (inicio de la semana)
+export function cargaFueraDeTermino(importaciones, semanaInicio) {
+  const primeras = new Map();
+  importaciones.filter((i) => i.semana === semanaInicio && i.origen !== 'migracion').forEach((i) => {
+    if (!primeras.has(i.area) || i.created_at < primeras.get(i.area)) primeras.set(i.area, i.created_at);
   });
-}
-
-// Tareas similares hechas por distintas personas (misma clave o ≥ 2 palabras y ≥ 60% en común)
-export function tareasEntrePersonas(unicas) {
-  const n = unicas.length, padre = unicas.map((_, i) => i);
-  const raiz = (x) => { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; };
-  const toks = unicas.map((t) => new Set(t.clave.split(' ').filter(Boolean)));
-  for (let i = 0; i < n; i++) {
-    if (!toks[i].size) continue;
-    for (let j = i + 1; j < n; j++) {
-      if (!toks[j].size) continue;
-      let inter = 0; for (const w of toks[i]) if (toks[j].has(w)) inter++;
-      // al menos 2 palabras en común y ≥ 60% de la tarea más larga: evita encadenar tareas distintas
-      if (inter >= 2 && inter / Math.max(toks[i].size, toks[j].size) >= 0.6) { const a = raiz(i), b = raiz(j); if (a !== b) padre[a] = b; }
-    }
-  }
-  const grupos = new Map();
-  unicas.forEach((t, i) => { const r = raiz(i); if (!grupos.has(r)) grupos.set(r, []); grupos.get(r).push(t); });
-  return [...grupos.values()].map((ts) => {
-    const personas = [...new Set(ts.flatMap((t) => t.personas))];
-    const veces = sum(ts, (t) => t.veces), horasSemana = sum(ts, (t) => t.horasSemana);
-    const autoProm = sum(ts, (t) => t.auto.score) / ts.length;
-    const tarea = [...ts].sort((a, b) => b.veces - a.veces)[0].tarea;
-    const recomendacion = personas.length >= 3 ? 'Centralizar el proceso en un responsable o en una plantilla compartida.'
-      : autoProm >= 70 ? 'Automatizar la tarea con herramientas de IA o RPA.' : 'Crear un procedimiento y una plantilla estándar compartida.';
-    return { tarea, personas, veces, horasSemana, recomendacion };
-  }).filter((g) => g.personas.length >= 2).sort((a, b) => b.horasSemana - a.horasSemana || b.veces - a.veces);
-}
-
-// Perfil de cada persona: horas por categoría y señales (sobrecarga, exceso administrativo, etc.)
-export function perfilesMejora(rows, nSemanas = 1) {
-  const semanas = Math.max(1, nSemanas);
-  return [...groupBy(rows.filter((r) => r.tarea), (r) => r.persona)].map(([persona, rs]) => {
-    const unicas = tareasUnicas(rs, semanas);
-    const horasCat = {}; unicas.forEach((t) => { horasCat[t.categoria] = (horasCat[t.categoria] || 0) + t.horasSemana; });
-    const horasSemana = sum(rs, (r) => r.horas) / semanas;
-    const jornada = Number(rs[0].jornada) || CONFIG.jornada;
-    const ocup = (horasSemana / jornada) * 100;
-    const admin = (horasCat.Administrativa || 0) + (horasCat['Documentación'] || 0) + (horasCat.Control || 0);
-    const senales = [];
-    if (ocup > CONFIG.ocupAlta) senales.push(['Sobrecarga', 'crit']);
-    if (ocup > 0 && ocup < 45) senales.push(['Infrautilización', 'warn']);
-    if (horasSemana > 0 && admin / horasSemana > 0.5) senales.push(['Exceso administrativo', 'warn']);
-    if (!unicas.some((t) => t.categoria === 'Estratégica') && unicas.length >= 5) senales.push(['Sin tareas estratégicas', 'info']);
-    if (!senales.length) senales.push(['Carga equilibrada', 'ok']);
-    const recuperable = sum(unicas, (t) => t.recuperableSemana);
-    const altaAuto = unicas.filter((t) => t.auto.score >= 70);
-    const horasRep = sum(unicas.filter((t) => t.repetida), (t) => t.horasSemana);
-    const dias = new Set(rs.map((r) => `${r.semana}|${diaDe(r)}`)).size / semanas;
-    const fortalezas = [], oportunidades = [];
-    if (dias >= 5) fortalezas.push('Buena distribución de actividades a lo largo de la semana.');
-    if (unicas.length && unicas.filter((t) => t.valor === 'Alto' || t.valor === 'Muy alto').length / unicas.length > 0.4) fortalezas.push('Alta participación en tareas de valor agregado alto o muy alto.');
-    if (ocup >= 60 && ocup <= CONFIG.ocupAlta) fortalezas.push('Carga horaria dentro de parámetros saludables.');
-    if (!fortalezas.length) fortalezas.push('Cumple con la planificación semanal registrada.');
-    if (horasRep > 0) oportunidades.push(`Automatizar o consolidar tareas repetitivas (${round1(horasRep)} h por semana).`);
-    if (altaAuto.length) oportunidades.push(`Aplicar herramientas de IA en ${altaAuto.length} ${altaAuto.length === 1 ? 'actividad' : 'actividades'} con alto potencial de automatización.`);
-    if (ocup > CONFIG.ocupAlta) oportunidades.push('Redistribuir tareas para reducir el riesgo de sobrecarga.');
-    if (!oportunidades.length) oportunidades.push('Mantener el esquema actual y monitorear los indicadores.');
-    return { persona, area: rs[0].area, horasSemana, ocup, horasCat, senales, recuperable, fortalezas, oportunidades,
-      herramientas: [...new Set(altaAuto.map((t) => t.herramienta).filter((x) => x !== 'Otras'))].slice(0, 5) };
-  }).sort((a, b) => b.recuperable - a.recuperable);
-}
-
-export function analisisMejoras(rows, nSemanas = 1) {
-  const unicas = tareasUnicas(rows, nSemanas);
-  const horasSem = sum(unicas, (t) => t.horasSemana);
-  const autoPond = horasSem > 0 ? sum(unicas, (t) => t.horasSemana * t.auto.score) / horasSem : (unicas.length ? sum(unicas, (t) => t.auto.score) / unicas.length : 0);
-  const indice = Math.max(0, Math.min(100, Math.round(100 - autoPond)));
-  const interpretacion = indice >= 90 ? 'Excelente utilización del tiempo' : indice >= 75 ? 'Muy buena utilización, con pequeñas oportunidades'
-    : indice >= 60 ? 'Existen oportunidades importantes de mejora' : indice >= 40 ? 'Muchas tareas repetitivas o poco eficientes' : 'Gran potencial de automatización disponible';
-  const automatizables = unicas.filter((t) => t.auto.score >= MEJORAS.umbralAutomatizable);
-  const recuperableSemana = sum(unicas, (t) => t.recuperableSemana);
-  const cuenta = (arr, f) => { const c = {}; arr.forEach((x) => { const k = f(x); c[k] = (c[k] || 0) + 1; }); return c; };
-  const valores = cuenta(unicas, (t) => t.valor);
-  const herr = cuenta(automatizables, (t) => t.herramienta);
-  const horasCategoria = {}; unicas.forEach((t) => { horasCategoria[t.categoria] = (horasCategoria[t.categoria] || 0) + t.horasSemana; });
-  const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])[0] || null;
-  return {
-    unicas, indice, interpretacion, recuperableSemana,
-    automatizables: automatizables.length, pctAutomatizable: unicas.length ? (automatizables.length / unicas.length) * 100 : null,
-    valorPredominante: top(valores), herramientaTop: top(herr), valores, herramientas: herr, horasCategoria,
-    recomendaciones: [...unicas].sort((a, b) => b.horasSemana * b.auto.score - a.horasSemana * a.auto.score).slice(0, 20),
-    entrePersonas: tareasEntrePersonas(unicas).slice(0, 20),
-    pctAdministrativo: unicas.length ? (unicas.filter((t) => t.categoria === 'Administrativa' || t.categoria === 'Documentación').length / unicas.length) * 100 : null,
-  };
+  const limite = `${addDays(semanaInicio, 1)}T00:00:00`; // hasta el lunes inclusive (hora local aproximada)
+  return [...primeras].filter(([, ts]) => new Date(ts) >= new Date(limite)).map(([area, ts]) => ({ area, cargada: ts }));
 }
 
 // =====================================================================
-// Tareas repetitivas (hoja del dashboard anterior): misma tarea más de una vez
-// para la misma persona en una misma semana. Usa la misma clave de tarea del motor.
-// "veces" y "semanas" se cuentan sobre todo el período filtrado.
+// Propuestas de mejora (registradas en la base, tabla propuestas_mejora)
 // =====================================================================
-export function tareasRepetitivas(rows) {
-  const porPersona = [];
-  for (const [persona, rs] of groupBy(rows.filter((r) => r.tarea), (r) => r.persona)) {
-    const tareas = [];
-    for (const [, ts] of groupBy(rs, (r) => claveTarea(r.tarea) || norm(r.tarea))) {
-      // repetitiva = más de una vez en una misma semana (como en el dashboard anterior)
-      const porSemana = groupBy(ts, (t) => t.semana);
-      if (![...porSemana.values()].some((x) => x.length > 1)) continue;
-      const conHoras = ts.filter((t) => t.horas > 0);
-      const horas = sum(conHoras, (t) => t.horas);
-      const textos = [...groupBy(ts, (t) => t.tarea)].sort((a, b) => b[1].length - a[1].length);
-      tareas.push({ tarea: textos[0][0], veces: ts.length, semanas: new Set(ts.map((t) => t.semana)).size,
-        horas, horasPorVez: conHoras.length ? horas / conHoras.length : null });
-    }
-    tareas.sort((a, b) => b.veces - a.veces || b.horas - a.horas);
-    porPersona.push({ persona, area: rs[0].area, tareas, horas: sum(tareas, (t) => t.horas) });
-  }
-  porPersona.sort((a, b) => b.tareas.length - a.tareas.length || b.horas - a.horas);
-  return {
-    porPersona,
-    personasConRepetitivas: porPersona.filter((p) => p.tareas.length).length,
-    personas: porPersona.length,
-    tareasDistintas: sum(porPersona, (p) => p.tareas.length),
-    horas: sum(porPersona, (p) => p.horas),
-  };
+export const FUENTES_PROPUESTA = ['Planificación', 'Carga', 'Cumplimiento', 'Riesgo', 'Auditoría', 'Tarea repetitiva', 'Otro'];
+export const TIPOS_MEJORA = ['Eliminar', 'Simplificar', 'Automatizar', 'Estandarizar', 'Redistribuir', 'Mejorar control', 'Otro'];
+export const NIVELES_IE = ['Bajo', 'Medio', 'Alto'];
+export const ESTADOS_PROPUESTA = ['Detectada', 'En análisis', 'Propuesta', 'Aprobada', 'En implementación', 'Implementada', 'Descartada'];
+export const ESTADOS_ACTIVOS = ['Detectada', 'En análisis', 'Propuesta', 'Aprobada', 'En implementación'];
+
+// Matriz Impacto × Esfuerzo: cuatro grupos de prioridad
+export const GRUPOS = {
+  quick: { orden: 1, nombre: 'Alta prioridad', sub: 'Alto impacto, bajo esfuerzo', clase: 'g-quick' },
+  estrategico: { orden: 2, nombre: 'Proyecto estratégico', sub: 'Alto impacto, requiere planificación', clase: 'g-estrategico' },
+  secundaria: { orden: 3, nombre: 'Mejora secundaria', sub: 'Impacto moderado, poco esfuerzo', clase: 'g-secundaria' },
+  baja: { orden: 4, nombre: 'Baja prioridad', sub: 'Poco impacto para el esfuerzo', clase: 'g-baja' },
+};
+// Regla explícita (se muestra en pantalla): el impacto manda; el esfuerzo decide dentro de cada nivel.
+export function grupoPropuesta(impacto, esfuerzo) {
+  if (!impacto || !esfuerzo) return null;
+  if (impacto === 'Alto') return esfuerzo === 'Bajo' ? 'quick' : 'estrategico';
+  if (impacto === 'Medio') return esfuerzo === 'Alto' ? 'baja' : 'secundaria';
+  return esfuerzo === 'Bajo' ? 'secundaria' : 'baja';
+}
+export const ordenPropuesta = (p) => (GRUPOS[grupoPropuesta(p.impacto, p.esfuerzo)]?.orden ?? 9);
+
+// Potencial: horas brutas que consume hoy el problema × reducción estimada por quien evalúa.
+// La aplicación NUNCA inventa el porcentaje: sin reducción cargada, el potencial queda pendiente.
+export function potencialPropuesta(p) {
+  const base = Number(p.horas_mes_base) || 0;
+  if (!base || p.ahorro_pct === null || p.ahorro_pct === undefined || p.ahorro_pct === '') return null;
+  return base * (Number(p.ahorro_pct) / 100);
+}
+
+// Resultado medido de una propuesta implementada vinculada a una tarea:
+// horas semanales de esa tarea antes y después de la fecha de implementación.
+export function resultadoPropuesta(p, rows, semanasISO) {
+  if (!p.tarea_clave || !p.fecha_implementacion) return null;
+  const corte = lunesDe(p.fecha_implementacion);
+  const antes = semanasISO.filter((s) => s < corte), despues = semanasISO.filter((s) => s >= corte);
+  if (!antes.length || !despues.length) return { antes: null, despues: null, semanasAntes: antes.length, semanasDespues: despues.length };
+  const propias = rows.filter((r) => r.tarea && claveDe(r) === p.tarea_clave);
+  const hAntes = sum(propias.filter((r) => r.semana < corte), (r) => r.horas) / antes.length;
+  const hDespues = sum(propias.filter((r) => r.semana >= corte), (r) => r.horas) / despues.length;
+  return { antes: hAntes, despues: hDespues, semanasAntes: antes.length, semanasDespues: despues.length,
+    variacionPct: hAntes > 0 ? ((hDespues - hAntes) / hAntes) * 100 : null };
 }
 
 // =====================================================================
-// Recomendaciones contextuales (reemplazan "Propuestas de mejoras" e "IA")
-// ctx: { rows, prevStats?, rangeRows?, alcance: 'semana'|'persona', persona? }
+// Situaciones que requieren atención (lugar principal: Riesgos y auditoría › Situaciones).
+// El Resumen muestra las más importantes. Cada una indica QUÉ OCURRE, POSIBLE CAUSA,
+// IMPACTO y ACCIÓN SUGERIDA, con los casos que la componen.
+// ctx: { rows, historico, cambios, cobertura, fueraDeTermino, semana, hoy, propuestas }
 // =====================================================================
-export function recomendaciones({ rows, rangeRows = [], persona = null }) {
+export function hallazgos({ rows, historico = [], cambios = [], cobertura = null, fueraDeTermino = [], semana, hoy = null, propuestas = [] }) {
   const out = [];
-  const base = persona ? rows.filter((r) => r.persona === persona) : rows;
-  if (!base.length) return out;
-  const stats = statsPersonas(rows);
+  const add = (h) => out.push({ casos: [], enlace: null, tipo: null, ...h });
+  const al = alertas(rows);
+  const porRegla = groupBy(al, (a) => a.regla);
+  const nivelMax = (as) => (as.some((a) => a.nivel === 'critica') ? 'critica' : as.some((a) => a.nivel === 'advertencia') ? 'advertencia' : 'info');
+  const personasDe = (as) => new Set(as.map((a) => a.persona)).size;
+  const casoDeAlerta = (a) => ({ persona: a.persona, area: a.area, que: a.que, causa: a.causa, impacto: a.impacto, accion: a.accion, prioridad: a.prioridad, dia: a.dia, nivel: a.nivel });
 
-  // Redistribución de carga (solo tiene sentido mirando al equipo)
-  const sobre = stats.filter((p) => p.ocupacion > CONFIG.ocupAlta && (!persona || p.persona === persona));
-  for (const p of sobre) {
-    const libre = stats.filter((q) => q.areas.some((a) => p.areas.includes(a)) && q.persona !== p.persona && q.ocupacion < 70)
-      .sort((a, b) => a.ocupacion - b.ocupacion)[0];
-    const exceso = p.horas - p.jornada;
-    out.push({
-      texto: libre ? `Pasar parte de las tareas de ${p.persona} (${round1(exceso)} h por encima de la jornada) a ${libre.persona}, que tiene ${round1(libre.horas)} h planificadas.`
-                   : `Revisar la planificación de ${p.persona}: supera la jornada en ${round1(exceso)} h y no hay otra persona del área con capacidad libre.`,
-      motivo: 'Sobrecarga', modulo: 'personas',
-    });
+  // ---------- Planificación ----------
+  if (cobertura?.faltan.length) {
+    const n = cobertura.faltan.length;
+    add({ id: 'plan_no_enviada', fuente: 'Planificación', nivel: n / Math.max(1, cobertura.habituales) >= 0.3 ? 'critica' : 'advertencia', tipo: 'Mejorar control',
+      titulo: 'Planificación no recibida',
+      que: `${n} de ${cobertura.habituales} personas que planifican habitualmente ${n === 1 ? 'no tiene' : 'no tienen'} planificación cargada esta semana.`,
+      causa: 'Requiere revisión: puede ser una ausencia (licencia, vacaciones) o una planificación que no se envió.',
+      impacto: 'Sin planificación no se puede analizar la carga ni el cumplimiento de esas personas.',
+      accion: 'Confirmar con cada área si corresponde y solicitar el Excel faltante.',
+      casos: cobertura.faltan.map((f) => ({ persona: f.persona, area: f.area, que: f.ultima ? `Última planificación: semana del ${fechaCortaTxt(f.ultima)}.` : 'Sin planificaciones anteriores.', prioridad: 'Media' })) });
+  }
+  if (fueraDeTermino.length) {
+    add({ id: 'plan_fuera_termino', fuente: 'Planificación', nivel: 'advertencia', tipo: 'Mejorar control', titulo: 'Planificación cargada fuera de término',
+      que: `La planificación de ${fueraDeTermino.map((f) => f.area).join(' y ')} se cargó después del inicio de la semana.`,
+      causa: REQUIERE_REVISION, impacto: 'La semana empezó sin planificación disponible para el seguimiento.',
+      accion: 'Acordar un horario límite de carga (por ejemplo, el viernes previo a la semana).',
+      casos: fueraDeTermino.map((f) => ({ persona: f.area, area: '', que: `Primera carga: ${fechaHoraTxt(f.cargada)}.`, prioridad: 'Media' })) });
+  }
+  const aud = auditoria(rows, semana);
+  const reglasInc = ['sin_tarea', 'sin_tiempo', 'sin_prioridad', 'sin_fecha'];
+  const incompletas = new Set(aud.filter((r) => reglasInc.includes(r.id)).flatMap((r) => r.items.map((x) => x.id)));
+  const pInc = pct(incompletas.size, rows.length);
+  if (pInc !== null && pInc >= CONFIG.incompletaMin) {
+    const det = aud.filter((r) => reglasInc.includes(r.id) && r.items.length).map((r) => `${r.items.length} ${r.nombre.toLowerCase()}`).join(', ');
+    const porPersona = groupBy(rows.filter((r) => incompletas.has(r.id)), (r) => r.persona);
+    const top = [...porPersona].sort((a, b) => b[1].length - a[1].length);
+    const concentrado = top.length && top.slice(0, 2).reduce((a, [, rs]) => a + rs.length, 0) / incompletas.size >= 0.6;
+    add({ id: 'plan_incompleta', fuente: 'Planificación', nivel: pInc >= 20 ? 'critica' : 'advertencia', tipo: 'Estandarizar', titulo: 'Planificación incompleta',
+      que: `${incompletas.size} actividades (${Math.round(pInc)}%) tienen datos faltantes: ${det}.`,
+      causa: concentrado ? `Se concentra en la planificación de ${top.slice(0, 2).map(([p]) => p).join(' y ')}.` : 'Está distribuido entre varias personas: puede faltar una pauta común para completar el Excel.',
+      impacto: 'Las horas y prioridades faltantes impiden medir la carga real y ordenar la semana.',
+      accion: 'Completar los campos faltantes en el Excel. El detalle por fila está en Auditoría.',
+      enlace: { modulo: 'riesgos', params: { tab: 'auditoria' } },
+      casos: top.map(([p, rs]) => ({ persona: p, area: rs[0].area, que: `${plural(rs.length, 'actividad incompleta', 'actividades incompletas')}.`, prioridad: 'Media' })) });
   }
 
-  const conEstado = pct(base.filter((r) => estadoDe(r) !== 'Sin estado').length, base.length);
-  if (conEstado < CONFIG.coberturaMin)
-    out.push({ texto: `Completar la columna Estado del Excel: hoy solo el ${Math.round(conEstado)}% de las actividades${persona ? ` de ${persona}` : ''} tiene estado, y el cumplimiento se calcula sobre ese porcentaje.`,
-      motivo: 'Cobertura de seguimiento', modulo: 'riesgos' });
+  // ---------- Cumplimiento ----------
+  const cob = pct(rows.filter((r) => estadoDe(r) !== 'Sin estado').length, rows.length);
+  if (cob !== null && cob < CONFIG.coberturaMin) {
+    add({ id: 'cumplimiento_no_medible', fuente: 'Cumplimiento', nivel: cob < 20 ? 'critica' : 'advertencia', tipo: 'Mejorar control', titulo: 'El cumplimiento no se puede medir',
+      que: `Solo el ${Math.round(cob)}% de las actividades tiene el Estado informado.`,
+      causa: 'La columna Estado del Excel no se completa de forma habitual.',
+      impacto: 'No se pueden detectar tareas pendientes ni vencidas, ni saber si lo planificado se cumplió.',
+      accion: 'Pedir que cada persona actualice el Estado (Pendiente, En curso, Cumplida o Cancelada) al cierre de la semana.' });
+  }
+  const pend = porRegla.get('incumplimiento') || [];
+  if (pend.length) {
+    const filasPend = rows.filter((r) => estadoDe(r) === 'Pendiente');
+    const vencidas = hoy ? filasPend.filter((r) => r.fecha && r.fecha < hoy).length : 0;
+    const altas = filasPend.filter((r) => r.prioridad === 'Alta').length;
+    const conRiesgo = filasPend.filter(tieneRiesgo).length;
+    add({ id: 'pendientes', fuente: 'Cumplimiento', nivel: nivelMax(pend), tipo: 'Redistribuir', titulo: 'Tareas pendientes',
+      que: `${plural(filasPend.length, 'tarea figura', 'tareas figuran')} como pendiente o no cumplida${vencidas ? `, ${vencidas} con fecha ya pasada` : ''}${altas ? `, ${altas} de prioridad Alta` : ''}.`,
+      causa: conRiesgo / filasPend.length >= 0.5 ? 'La mayoría tiene riesgos declarados en el Excel.' : REQUIERE_REVISION,
+      impacto: 'Compromisos sin terminar que pueden trasladarse a la semana siguiente.',
+      accion: 'Confirmar nueva fecha y recursos, empezando por las de prioridad Alta.',
+      casos: pend.map(casoDeAlerta) });
+  }
+  const repro = new Set(cambios.filter((c) => c.tipo === 'modificacion' && c.campo === 'fecha').map((c) => c.actividadId));
+  if (repro.size) {
+    const cs = cambios.filter((c) => c.tipo === 'modificacion' && c.campo === 'fecha');
+    add({ id: 'reprogramaciones', fuente: 'Cumplimiento', nivel: repro.size >= 5 ? 'advertencia' : 'info', tipo: 'Mejorar control', titulo: 'Reprogramaciones',
+      que: `${plural(repro.size, 'tarea cambió', 'tareas cambiaron')} de fecha después de la primera carga.`, causa: REQUIERE_REVISION,
+      impacto: 'Las reprogramaciones frecuentes indican una planificación poco realista o imprevistos recurrentes.',
+      accion: 'Revisar si responden a imprevistos o a estimaciones optimistas.',
+      casos: cs.map((c) => ({ persona: c.persona, area: c.area, que: `"${recortar(c.tarea, 60)}": ${c.antes ?? '—'} → ${c.despues ?? '—'}.`, prioridad: 'Baja' })) });
+  }
+  const abiertas = tareasAbiertas([...historico, ...rows], semana);
+  if (abiertas.length) {
+    add({ id: 'abiertas', fuente: 'Cumplimiento', nivel: abiertas.some((a) => a.semanas >= 3) ? 'advertencia' : 'info', tipo: 'Simplificar', titulo: 'Tareas abiertas durante varias semanas',
+      que: `${plural(abiertas.length, 'tarea sigue', 'tareas siguen')} en estado Pendiente o En curso desde semanas anteriores (hasta ${Math.max(...abiertas.map((a) => a.semanas))} semanas).`,
+      causa: REQUIERE_REVISION, impacto: 'Las tareas que no se cierran ocupan capacidad y ocultan bloqueos.',
+      accion: 'Revisar bloqueos y definir una fecha de cierre, o descartarlas.',
+      casos: abiertas.map((a) => ({ persona: a.persona, area: a.area, que: `"${recortar(a.tarea, 60)}": abierta en ${a.semanas} semanas, desde el ${fechaCortaTxt(a.desde)}.`, prioridad: a.prioridad === 'Alta' ? 'Alta' : 'Media' })) });
+  }
 
-  const semanasBase = [...new Set(base.map((r) => r.semana))];
-  const conReal = [...new Set(base.map((r) => r.personaId))].filter((id) => semanasBase.some((s) => CTX.reales.has(`${s}|${id}`))).length;
-  if (conReal === 0)
-    out.push({ texto: `Cargar las horas reales de la semana${persona ? ` de ${persona}` : ' de cada persona'} en Personas: es un solo número por persona y permite medir el desvío frente a lo planificado.`,
-      motivo: 'Plan vs real', modulo: 'personas' });
+  // ---------- Carga ----------
+  const sobre = porRegla.get('sobrecarga') || [];
+  if (sobre.length) {
+    const stats = statsPersonas(rows);
+    const areasSobre = new Set(stats.filter((p) => p.ocupacion > CONFIG.ocupAlta).flatMap((p) => p.areas));
+    const conCapacidad = stats.filter((p) => p.ocupacion < 70 && p.horas > 0 && p.areas.some((a) => areasSobre.has(a)));
+    add({ id: 'sobrecarga', fuente: 'Carga', nivel: nivelMax(sobre), tipo: 'Redistribuir', titulo: 'Sobrecarga',
+      que: `${plural(sobre.length, 'persona presenta', 'personas presentan')} una carga superior a su capacidad semanal estimada.`,
+      causa: sobre.filter((a) => a.causa !== REQUIERE_REVISION).length >= sobre.length / 2 ? 'En la mayoría de los casos, horas concentradas en días puntuales o tareas de larga duración (ver cada caso).' : REQUIERE_REVISION,
+      impacto: 'Riesgo de incumplimiento o necesidad de reprogramación.',
+      accion: conCapacidad.length ? `Evaluar redistribuir tareas de prioridad Media o Baja: en las mismas áreas hay ${plural(conCapacidad.length, 'persona', 'personas')} por debajo del 70% de su capacidad.` : 'Revisar alcance y plazos con los responsables: no hay capacidad disponible en las mismas áreas.',
+      enlace: { modulo: 'planificacion' }, casos: sobre.map(casoDeAlerta) });
+  }
+  const dias = [...(porRegla.get('dia_saturado') || []), ...(porRegla.get('concentracion_dia') || [])];
+  if (dias.length) {
+    add({ id: 'dias_sobrecarga', fuente: 'Carga', nivel: 'advertencia', tipo: 'Redistribuir', titulo: 'Concentración de carga en días puntuales',
+      que: `${plural(dias.length, 'día-persona supera', 'días-persona superan')} la capacidad diaria estimada (${plural(personasDe(dias), 'persona', 'personas')}).`,
+      causa: 'Distribución despareja dentro de la semana: cada caso indica las tareas que la generan.',
+      impacto: 'Es difícil completar todo lo planificado en esos días.',
+      accion: 'Reprogramar tareas de prioridad Media o Baja hacia días con menos carga.',
+      enlace: { modulo: 'planificacion' }, casos: dias.map(casoDeAlerta) });
+  }
+  const baja = porRegla.get('subregistro') || [];
+  if (baja.length) {
+    add({ id: 'baja_utilizacion', fuente: 'Carga', nivel: 'info', tipo: 'Redistribuir', titulo: 'Baja utilización',
+      que: `${plural(baja.length, 'persona tiene', 'personas tienen')} menos del ${CONFIG.ocupBaja}% de su capacidad semanal planificada.`,
+      causa: REQUIERE_REVISION, impacto: 'La carga informada puede no reflejar el trabajo real, o existe capacidad disponible.',
+      accion: 'Confirmar si la planificación está completa; si hay capacidad libre, considerarla al redistribuir.',
+      enlace: { modulo: 'planificacion' }, casos: baja.map(casoDeAlerta) });
+  }
+  const prio = [...(porRegla.get('prioridad_alta_excesiva') || []), ...(porRegla.get('alta_sin_tiempo') || [])];
+  if (prio.length) {
+    add({ id: 'criterio_prioridad', fuente: 'Planificación', nivel: 'info', tipo: 'Estandarizar', titulo: 'Criterio de prioridades',
+      que: `En la planificación de ${plural(personasDe(prio), 'persona', 'personas')}, la prioridad Alta no ordena el trabajo: casi todo es Alta, o las tareas Alta tienen muy poco tiempo.`,
+      causa: REQUIERE_REVISION, impacto: 'Sin un criterio común, la prioridad no sirve para decidir qué hacer primero.',
+      accion: 'Acordar por área qué se considera prioridad Alta.', casos: prio.map(casoDeAlerta) });
+  }
 
-  const hTot = sum(base, (r) => r.horas);
-  const hAlta = sum(base.filter((r) => r.prioridad === 'Alta'), (r) => r.horas);
-  if (hTot > 0 && hAlta / hTot > CONFIG.altaShareMax)
-    out.push({ texto: `Revisar el criterio de prioridades: el ${Math.round((hAlta / hTot) * 100)}% de las horas está marcado como Alta.`,
-      motivo: 'Prioridades', modulo: 'planificacion' });
+  // ---------- Riesgos ----------
+  const declarados = [...groupBy(rows.filter(tieneRiesgo), (r) => claveRiesgo(r.personaId, r.riesgos))].map(([, rs]) => ({ r: rs[0], nivel: nivelDe(rs[0]) }));
+  const altos = declarados.filter((d) => d.nivel === 'alto' || d.nivel === 'crítico');
+  if (altos.length) {
+    add({ id: 'riesgos_altos', fuente: 'Riesgo', nivel: altos.some((d) => d.nivel === 'crítico') ? 'critica' : 'advertencia', tipo: 'Mejorar control', titulo: 'Riesgos de nivel alto o crítico',
+      que: `${plural(altos.length, 'riesgo declarado tiene', 'riesgos declarados tienen')} nivel alto o crítico.`,
+      causa: 'Declarados por las personas en la columna Riesgos del Excel.',
+      impacto: 'Pueden afectar el cumplimiento de las tareas asociadas.',
+      accion: 'Definir una acción de mitigación y un responsable para cada uno.',
+      enlace: { modulo: 'riesgos', params: { tab: 'riesgos' } },
+      casos: altos.map((d) => ({ persona: d.r.persona, area: d.r.area, que: recortar(d.r.riesgos, 110), causa: `Tarea: ${recortar(d.r.tarea, 60)}`, impacto: `Nivel ${d.nivel}`, prioridad: PRIORIDAD_RIESGO[d.nivel] })) });
+  }
+  const persist = riesgosPersistentes([...historico, ...rows]).filter((x) => x.semanas >= CONFIG.recurrenciaSemanas && x.hasta === semana);
+  if (persist.length) {
+    add({ id: 'riesgos_persistentes', fuente: 'Riesgo', nivel: 'advertencia', tipo: 'Otro', titulo: 'Riesgos que se repiten',
+      que: `${plural(persist.length, 'riesgo se declara', 'riesgos se declaran')} desde hace ${CONFIG.recurrenciaSemanas} semanas o más.`,
+      causa: 'Riesgos que no se resuelven de una semana a otra: posible problema estructural.',
+      impacto: 'Afectan de forma sostenida la planificación de las personas involucradas.',
+      accion: 'Tratarlos como problema de fondo: evaluar una propuesta de mejora.',
+      casos: persist.map((x) => ({ persona: x.personas.join(', '), area: '', que: recortar(x.riesgo, 110), causa: `${x.semanas} semanas, desde el ${fechaCortaTxt(x.desde)}`, prioridad: 'Media' })) });
+  }
+  const sinEval = declarados.filter((d) => !d.nivel);
+  if (sinEval.length >= 3) {
+    add({ id: 'riesgos_sin_evaluar', fuente: 'Riesgo', nivel: 'info', tipo: 'Mejorar control', titulo: 'Riesgos sin evaluar',
+      que: `${sinEval.length} riesgos declarados todavía no tienen probabilidad e impacto.`, causa: 'Falta completar la evaluación en la Matriz de riesgo.',
+      impacto: 'No se puede priorizar qué riesgos atender primero.', accion: 'Asignar probabilidad e impacto: la evaluación se aplica sola en las semanas siguientes.',
+      enlace: { modulo: 'riesgos', params: { tab: 'riesgos' } } });
+  }
+  const acum = porRegla.get('acumulacion_riesgos') || [];
+  if (acum.length) {
+    add({ id: 'acumulacion_riesgos', fuente: 'Riesgo', nivel: 'advertencia', tipo: 'Mejorar control', titulo: 'Acumulación de riesgos',
+      que: `${plural(acum.length, 'persona declara', 'personas declaran')} más de ${CONFIG.riesgosMax} riesgos distintos en la semana.`, causa: REQUIERE_REVISION,
+      impacto: 'Muchos riesgos simultáneos aumentan la probabilidad de desvíos.', accion: 'Evaluarlos en la Matriz de riesgo y definir cuáles atender.',
+      enlace: { modulo: 'riesgos', params: { tab: 'riesgos' } }, casos: acum.map(casoDeAlerta) });
+  }
 
-  const sinEvaluar = new Set(base.filter((r) => tieneRiesgo(r) && !nivelDe(r)).map((r) => claveRiesgo(r.personaId, r.riesgos))).size;
-  if (sinEvaluar >= 3)
-    out.push({ texto: `Evaluar probabilidad e impacto de ${sinEvaluar} riesgos declarados que todavía no tienen nivel. Cada evaluación se aplica sola en las semanas siguientes.`,
-      motivo: 'Riesgos declarados', modulo: 'riesgos' });
+  // ---------- Organización ----------
+  const dup = aud.find((r) => r.id === 'posible_duplicado');
+  if (dup && dup.items.length >= 3) {
+    add({ id: 'duplicados', fuente: 'Auditoría', nivel: 'info', tipo: 'Estandarizar', titulo: 'Posibles tareas duplicadas',
+      que: `${dup.items.length} actividades repiten la misma tarea, persona y día.`, causa: REQUIERE_REVISION,
+      impacto: 'Las horas duplicadas inflan la carga informada.', accion: 'Unificar las filas repetidas en el Excel.',
+      enlace: { modulo: 'riesgos', params: { tab: 'auditoria', regla: 'posible_duplicado' } } });
+  }
+  const conPropuesta = new Set(propuestas.filter((p) => p.tarea_clave).map((p) => p.tarea_clave));
+  const nSemHist = new Set([...historico, ...rows].map((r) => r.semana)).size;
+  const rep = analisisRepetitivas([...historico, ...rows], nSemHist).filter((t) => t.horasMes >= 4 && t.tipoSugerido && !conPropuesta.has(t.clave));
+  if (rep.length) {
+    add({ id: 'repetitivas', fuente: 'Tarea repetitiva', nivel: 'info', tipo: null, titulo: 'Tareas repetitivas con potencial de mejora',
+      que: `${plural(rep.length, 'tarea se repite', 'tareas se repiten')} de forma habitual y ${rep.length === 1 ? 'consume' : 'suman'} ${round1(sum(rep, (t) => t.horasMes))} h por mes.`,
+      causa: 'Trabajo recurrente de tipo manual, administrativo o compartido, sin una propuesta de mejora registrada.',
+      impacto: 'Son las primeras candidatas a eliminar, simplificar, automatizar o estandarizar.',
+      accion: 'Evaluarlas en Propuestas de mejora, empezando por las de más horas.',
+      enlace: { modulo: 'mejoras' },
+      casos: rep.slice(0, 10).map((t) => ({ persona: t.personas.length > 2 ? `${t.personas.length} personas` : t.personas.join(', '), area: t.areas.join(', '), que: `"${recortar(t.tarea, 70)}": ${round1(t.vecesSemana)} veces por semana, ${round1(t.horasMes)} h/mes.`, prioridad: 'Baja' })) });
+  }
 
-  const rangeBase = persona ? rangeRows.filter((r) => r.persona === persona) : rangeRows;
-  const rec = recurrentesPeriodo(rangeBase).filter((t) => AUTOMATIZABLE.has(t.categoria) && t.horasSemana >= 1).slice(0, 2);
-  for (const t of rec)
-    out.push({ texto: `Estandarizar o automatizar "${recortar(t.tarea, 70)}": aparece en ${t.semanas} semanas y consume ${round1(t.horasSemana)} h por semana${t.personas.length > 1 ? ` entre ${t.personas.length} personas` : ''}.`,
-      motivo: 'Tareas recurrentes', modulo: 'mejoras' });
+  const orden = { critica: 0, advertencia: 1, info: 2 };
+  return out.sort((a, b) => orden[a.nivel] - orden[b.nivel]);
+}
 
-  const pers = riesgosPersistentes(rangeBase).filter((x) => x.semanas >= 3).slice(0, 1);
-  for (const x of pers)
-    out.push({ texto: `Definir una acción para el riesgo "${recortar(x.riesgo, 70)}": se declara hace ${x.semanas} semanas.`,
-      motivo: 'Riesgo persistente', modulo: 'riesgos' });
-
-  return out;
+// =====================================================================
+// Serie semanal para Evolución: ¿estamos mejorando?
+// =====================================================================
+export function serieSemanal(rows, cambios, semanas, propuestas = []) {
+  const porSemana = groupBy(rows, (r) => r.semana);
+  const cambiosPorSemana = groupBy(cambios || [], (c) => c.semana);
+  return semanas.map((s) => {
+    const rs = porSemana.get(s) || [];
+    const k = kpisSemana(rs);
+    const cs = cambiosPorSemana.get(s) || [];
+    const personasReal = [...new Set(rs.map((r) => r.personaId))].filter((id) => CTX.reales.has(`${s}|${id}`));
+    const real = sum(personasReal, (id) => CTX.reales.get(`${s}|${id}`));
+    const plan = sum(rs.filter((r) => personasReal.includes(r.personaId)), (r) => r.horas);
+    // distribución de días-persona hábiles por nivel de carga
+    const niveles = { sobrecarga: 0, elevada: 0, normal: 0, baja: 0, sin: 0 };
+    for (const p of cargaDiaria(rs).values()) DIAS.slice(0, CONFIG.diasHabiles).forEach((d) => { const n = p.dias[d].nivel; if (n in niveles) niveles[n]++; });
+    const diasPersona = Object.values(niveles).reduce((a, b) => a + b, 0);
+    const declarados = [...groupBy(rs.filter(tieneRiesgo), (r) => claveRiesgo(r.personaId, r.riesgos)).values()].map((x) => nivelDe(x[0]));
+    const fin = addDays(s, 6);
+    return {
+      semana: s, ...k,
+      niveles, diasPersona,
+      pctDiasNormales: pct(niveles.normal + niveles.elevada, diasPersona),
+      riesgos: declarados.length,
+      riesgosAltos: declarados.filter((n) => n === 'alto' || n === 'crítico').length,
+      horasRepetidas: sum(repetitivasSemana(rs), (t) => t.horas),
+      horasReales: personasReal.length ? real : null,
+      desvioPct: personasReal.length && plan > 0 ? ((real - plan) / plan) * 100 : null,
+      agregadas: cs.filter((c) => c.tipo === 'alta').length,
+      modificadas: new Set(cs.filter((c) => c.tipo === 'modificacion' && c.origen === 'excel').map((c) => c.actividadId)).size,
+      retiradas: cs.filter((c) => c.tipo === 'retiro').length,
+      reprogramadas: new Set(cs.filter((c) => c.tipo === 'modificacion' && c.campo === 'fecha').map((c) => c.actividadId)).size,
+      propuestasAcum: propuestas.filter((p) => p.created_at && p.created_at.slice(0, 10) <= fin).length,
+      implementadasAcum: propuestas.filter((p) => p.estado === 'Implementada' && p.fecha_implementacion && p.fecha_implementacion <= fin).length,
+    };
+  });
 }
 
 // ---------- fechas ----------
@@ -642,7 +830,13 @@ export function lunesDe(iso) {
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
   return addDays(iso, -((dow + 6) % 7));
 }
+export function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 export function recortar(s, n) { return s && s.length > n ? s.slice(0, n - 1) + '…' : s || ''; }
+const fechaCortaTxt = (iso) => { if (!iso) return '—'; const [, m, d] = iso.split('-'); return `${+d}/${+m}`; };
+const fechaHoraTxt = (ts) => new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // =====================================================================
 // Cumplimiento de carga: semanas con planificación sobre el total
