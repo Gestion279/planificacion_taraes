@@ -13,7 +13,7 @@ import { situacionesSemana } from '../situaciones.js';
 
 export const titulo = 'Propuestas de mejora';
 const VISTAS = [['activas', 'En curso'], ['implementadas', 'Implementadas'], ['descartadas', 'Descartadas'], ['todas', 'Todas']];
-const ORIGENES = [['repetitivas', 'Tareas repetitivas'], ['similares', 'Tareas similares entre personas'], ['situaciones', 'Situaciones de la semana']];
+const ORIGENES = [['repetitivas', 'Tareas repetitivas con potencial'], ['similares', 'Tareas similares entre personas'], ['situaciones', 'Situaciones de la semana']];
 const S = { vista: 'activas', celda: null, origen: 'repetitivas' };
 const CAT_ORDEN = ['Administrativa', 'Documentación', 'Control', 'Repetitiva', 'Comunicación', 'Gestión', 'Operativa', 'Automatización', 'Analítica', 'Creativa', 'Estratégica'];
 
@@ -31,7 +31,8 @@ export async function render(el, app) {
 async function mejoras(cont, { rows, n, app, volver }) {
   const todas = app.propuestasVisibles();
   const porClave = new Map(todas.filter((p) => p.tarea_clave).map((p) => [p.tarea_clave, p]));
-  const rep = rows.length ? analisisRepetitivas(rows, n) : [];
+  // solo las que tienen un tipo de mejora sugerido: el detalle completo por persona está en la hoja Tareas repetitivas
+  const rep = rows.length ? analisisRepetitivas(rows, n).filter((t) => t.tipoSugerido) : [];
   const similares = rows.length ? tareasEntrePersonas(rows, n) : [];
   const { lista: situ } = await situacionesSemana(app);
   const situProponibles = situ.filter((s) => s.id !== 'repetitivas');
@@ -109,7 +110,7 @@ async function mejoras(cont, { rows, n, app, volver }) {
   const pintarOportunidades = () => {
     const c = cont.querySelector('[data-oportunidades]');
     if (S.origen === 'repetitivas') {
-      c.innerHTML = `<p class="porque">Tareas que se repiten por frecuencia (varias veces por semana), recurrencia (${CONFIG.recurrenciaSemanas} semanas o más) o porque las hacen varias personas. Son candidatas a eliminar, simplificar, automatizar o estandarizar. El tipo sugerido surge del texto de la tarea y lo confirma quien la evalúa.</p><div data-t></div>`;
+      c.innerHTML = `<p class="porque">Tareas que se repiten por frecuencia (varias veces por semana), recurrencia (${CONFIG.recurrenciaSemanas} semanas o más) o porque las hacen varias personas. Se muestran las que, por su texto, parecen manuales, administrativas o compartidas; el tipo sugerido lo confirma quien la evalúa. El Top 5 de cada persona está en <a href="#/repetitivas">Tareas repetitivas</a>.</p><div data-t></div>`;
       tabla(c.querySelector('[data-t]'), {
         rows: rep, max: 60, orden: { key: 'horasMes', dir: -1 }, vacio: 'No se detectaron tareas repetitivas en el período.',
         cols: [
