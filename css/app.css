@@ -692,8 +692,9 @@ a.lo-tit { text-decoration: none; } a.lo-tit:hover { text-decoration: underline;
 }
 
 /* ---------- Tareas repetitivas: Top 5 por persona ---------- */
-.grid-rep { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; align-items: start; }
-.grid-rep > .panel { margin-bottom: 0; }
+.grid-rep { display: flex; gap: 14px; align-items: flex-start; }
+.rep-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.rep-col > .panel { margin-bottom: 0; }
 .rep-cab { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .rep-cab h2 { font-size: 15px; font-weight: 700; }
 .rep-sint { margin: 2px 0 10px; font-size: 13px; color: var(--tinta-2); }
@@ -703,7 +704,7 @@ a.lo-tit { text-decoration: none; } a.lo-tit:hover { text-decoration: underline;
 .rep-tabla th.num, .rep-tabla td.num { width: 92px; }
 .rep-opor { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 12px; font-weight: 600; color: #B4651F; }
 .rep-opor a { font-weight: 600; }
-@media (max-width: 860px) { .grid-rep { grid-template-columns: 1fr; } .rep-tabla th.num, .rep-tabla td.num { width: auto; } }
+
 .rep-opor { flex-wrap: nowrap; gap: 8px; font-weight: 500; }
 .rep-eval { all: unset; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--bluffs-txt); text-decoration: underline; text-underline-offset: 2px; }
 .rep-eval:focus-visible { outline: 2px solid var(--bluffs); border-radius: 2px; }
