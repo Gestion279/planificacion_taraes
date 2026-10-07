@@ -11,6 +11,10 @@ import { prepararPeriodo } from './periodo.js';
 import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
 
 export const titulo = 'Tareas repetitivas';
+// Distribución de los cuadros: columnas de al menos ANCHO_MIN px separadas por SEPARACION px
+// (la misma separación en vertical y en horizontal).
+const ANCHO_MIN = 400, SEPARACION = 14;
+let observador = null;
 
 export async function render(el, app) {
   const volver = () => render(el, app);
@@ -42,9 +46,39 @@ function repetitivas(cont, { rows, n, app, volver }) {
     </section>`).join('')}</div>`}
   ${sin.length ? `<p class="nota">Sin tareas repetidas en el período: ${sin.map((p) => esc(p.persona)).join(', ')}.</p>` : ''}`;
 
+  const grid = cont.querySelector('.grid-rep');
+  if (grid) distribuir(grid);
+
   cont.querySelectorAll('[data-evaluar]').forEach((b) => b.addEventListener('click', () => {
     const [i, clave] = [b.dataset.evaluar.slice(0, b.dataset.evaluar.indexOf('|')), b.dataset.evaluar.slice(b.dataset.evaluar.indexOf('|') + 1)];
     const t = con[+i].tareas.find((x) => x.clave === clave);
     abrirPropuesta(app, { borrador: borradorDeTarea(t, app), alGuardar: volver });
   }));
+}
+
+// Cada cuadro va a la columna que está más corta, en el orden de la lista (área y nombre).
+// Los cuadros quedan apilados dentro de columnas reales: nunca se superponen y la separación
+// vertical es la misma que la horizontal, sin importar cuántas tareas tenga cada uno.
+function distribuir(grid) {
+  const cuadros = [...grid.querySelectorAll('.rep-card')];
+  let columnas = 0;
+  const armar = (forzar = false) => {
+    const n = Math.max(1, Math.floor((grid.clientWidth + SEPARACION) / (ANCHO_MIN + SEPARACION)));
+    if (n === columnas && !forzar) return;
+    columnas = n;
+    const cols = Array.from({ length: n }, () => { const c = document.createElement('div'); c.className = 'rep-col'; return c; });
+    grid.replaceChildren(...cols);
+    const alturas = new Array(n).fill(0);
+    cuadros.forEach((c) => {
+      const i = alturas.indexOf(Math.min(...alturas));
+      cols[i].append(c);
+      alturas[i] += c.offsetHeight + SEPARACION;
+    });
+  };
+  armar(true);
+  // se recalcula si cambia el ancho disponible (ventana, panel lateral) y cuando terminan de cargar las fuentes
+  observador?.disconnect();
+  observador = new ResizeObserver(() => { if (grid.isConnected) armar(); else observador.disconnect(); });
+  observador.observe(grid);
+  document.fonts?.ready.then(() => { if (grid.isConnected) armar(true); });
 }
