@@ -10,12 +10,13 @@ import * as planificacion from './modules/planificacion.js';
 import * as riesgos from './modules/riesgos.js';
 import * as evolucion from './modules/evolucion.js';
 import * as mejoras from './modules/mejoras.js';
+import * as repetitivas from './modules/repetitivas.js';
 import * as carga from './modules/carga.js';
 
-const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, carga };
-// Rutas anteriores: Personas se integró en Planificación (detalle del mapa de calor) y en Carga (jornada y horas reales);
-// Tareas repetitivas se integró en Propuestas de mejora. Los enlaces guardados siguen funcionando.
-const RUTAS_ANTERIORES = { personas: 'planificacion', repetitivas: 'mejoras' };
+const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, repetitivas, carga };
+// Ruta anterior: Personas se integró en Planificación (detalle del mapa de calor) y en Carga (jornada y horas reales).
+// Los enlaces guardados siguen funcionando.
+const RUTAS_ANTERIORES = { personas: 'planificacion' };
 
 // ---------- estado compartido (una sola fuente de datos para todos los módulos) ----------
 export const app = {

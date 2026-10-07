@@ -25,6 +25,7 @@ export const CONFIG = {
   coberturaMin: 50,       // % de actividades con estado para confiar en el cumplimiento
   incompletaMin: 5,       // % de actividades incompletas a partir del cual se informa a Gerencia
   semanasPorMes: 4.33,
+  oportunidadHorasMes: 4, // horas por mes a partir de las cuales una tarea repetitiva se señala como posible oportunidad
 };
 
 // Datos que se cargan en la aplicación (no vienen del Excel). Los completa app.js.
@@ -404,6 +405,25 @@ export function analisisRepetitivas(rows, nSemanas = 1) {
   }
   return out.sort((a, b) => (b.horasMes || 0) - (a.horasMes || 0) || b.veces - a.veces);
 }
+// Hoja Tareas repetitivas: Top N por persona. Repetida = la misma tarea (misma clave) 2 o más veces en el período.
+// Orden: veces repetida y, ante empate, horas acumuladas. La "posible oportunidad" es solo una señal:
+// la decisión de crear una propuesta queda separada.
+export function topRepetitivasPorPersona(rows, nSemanas = 1, top = 5) {
+  const semanas = Math.max(1, nSemanas);
+  return [...groupBy(rows.filter((r) => r.tarea), (r) => r.persona)].map(([persona, rs]) => {
+    const tareas = [...groupBy(rs, claveDe)].filter(([clave, ts]) => clave && ts.length >= 2).map(([clave, ts]) => {
+      const tarea = [...groupBy(ts, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+      const horas = sum(ts, (r) => r.horas);
+      const tipo = tipoSugerido(tarea, clasificar(tarea, true), 1);
+      const horasMes = horas > 0 ? (horas / semanas) * CONFIG.semanasPorMes : null;
+      return { clave, tarea, veces: ts.length, horas, sinHoras: ts.filter((r) => !r.horas).length, semanas: new Set(ts.map((r) => r.semana)).size,
+        vecesSemana: ts.length / semanas, horasMes, tipoSugerido: tipo, oportunidad: !!tipo && horasMes >= CONFIG.oportunidadHorasMes,
+        personas: [persona], areas: areasDe(ts) };
+    }).sort((a, b) => b.veces - a.veces || b.horas - a.horas);
+    const sel = tareas.slice(0, top);
+    return { persona, area: areasDe(rs).join(', '), totalRepetidas: tareas.length, tareas: sel, veces: sum(sel, (t) => t.veces), horas: sum(sel, (t) => t.horas) };
+  }).sort((a, b) => a.area.localeCompare(b.area, 'es') || a.persona.localeCompare(b.persona, 'es')); // por área y nombre: no es un ranking
+}
 export const CRITERIOS_REP = { frecuencia: 'Varias veces por semana', recurrencia: 'Se repite entre semanas', personas: 'La hacen varias personas' };
 
 // Tareas similares hechas por distintas personas (misma clave o ≥ 2 palabras y ≥ 60% en común)
@@ -766,7 +786,7 @@ export function hallazgos({ rows, historico = [], cambios = [], cobertura = null
   }
   const conPropuesta = new Set(propuestas.filter((p) => p.tarea_clave).map((p) => p.tarea_clave));
   const nSemHist = new Set([...historico, ...rows].map((r) => r.semana)).size;
-  const rep = analisisRepetitivas([...historico, ...rows], nSemHist).filter((t) => t.horasMes >= 4 && t.tipoSugerido && !conPropuesta.has(t.clave));
+  const rep = analisisRepetitivas([...historico, ...rows], nSemHist).filter((t) => t.horasMes >= CONFIG.oportunidadHorasMes && t.tipoSugerido && !conPropuesta.has(t.clave));
   if (rep.length) {
     add({ id: 'repetitivas', fuente: 'Tarea repetitiva', nivel: 'info', tipo: null, titulo: 'Tareas repetitivas con potencial de mejora',
       que: `${plural(rep.length, 'tarea se repite', 'tareas se repiten')} de forma habitual y ${rep.length === 1 ? 'consume' : 'suman'} ${round1(sum(rep, (t) => t.horasMes))} h por mes.`,
