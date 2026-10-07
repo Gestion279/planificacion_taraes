@@ -5,8 +5,9 @@
 import * as db from '../db.js';
 import { leerArchivo, armarPayload } from '../excel.js';
 import { leerDashboardAnterior, unirCargas } from '../legacy.js';
-import { lunesDe, addDays } from '../engine.js';
-import { esc, num, tabla, fechaHora, rangoSemana, etiquetaSemana, aviso, h } from '../ui.js';
+import { lunesDe, addDays, CTX, capacidadDia, CONFIG } from '../engine.js';
+import { olvidarSituaciones } from '../situaciones.js';
+import { esc, num, tabla, fechaHora, rangoSemana, etiquetaSemana, aviso, h, horas, signo } from '../ui.js';
 
 export const titulo = 'Carga';
 
@@ -41,6 +42,11 @@ export async function render(el, app) {
     <div data-archivos></div>
   </section>
   <section class="panel"><header class="panel-cab"><h2>Historial de cargas</h2></header><div data-historial><p class="tenue">Cargando…</p></div></section>
+  <details class="panel migracion" data-capacidad-panel>
+    <summary><h2>Capacidad y horas reales</h2><span class="tenue">Jornada de cada persona y horas reales de la semana${app.semana ? ` del ${rangoSemana(app.semana.inicio, app.semana.fin)}` : ''}</span></summary>
+    <p>La <b>jornada semanal</b> define la capacidad estimada que usan el mapa de calor y las alertas de carga (capacidad diaria = jornada ÷ ${CONFIG.diasHabiles}). Las <b>horas reales</b> son un total por persona para la semana elegida arriba y permiten medir el desvío frente a lo planificado. Se guardan al salir del casillero; el Excel no las modifica.</p>
+    <div data-capacidad></div>
+  </details>
   <details class="panel migracion">
     <summary><h2>Unificar personas</h2><span class="tenue">Para errores de tipeo en el nombre</span></summary>
     <p>Si una misma persona aparece con dos nombres (por ejemplo "David Toleado" y "David Toledo"), unificalas: todas sus actividades pasan a la persona correcta y las próximas cargas con el nombre mal escrito se corrigen solas.</p>
@@ -63,8 +69,61 @@ export async function render(el, app) {
   el.querySelector('[data-legado]').addEventListener('change', (e) => migracion([...e.target.files], el.querySelector('[data-legado-res]'), app));
 
   claveCampo(el.querySelector('[data-clave-cont]'));
+  capacidad(el.querySelector('[data-capacidad]'), app);
   unificar(el.querySelector('[data-unificar]'), app);
   await historial(el.querySelector('[data-historial]'));
+}
+
+// Jornada (capacidad) y horas reales por persona — antes en la hoja Personas
+function capacidad(cont, app) {
+  if (!app.semana) { cont.innerHTML = '<p class="vacio">Todavía no hay semanas cargadas.</p>'; return; }
+  const planif = new Map();
+  (app._sinFiltrar.filas || []).forEach((r) => planif.set(r.personaId, (planif.get(r.personaId) || 0) + (r.horas || 0)));
+  const filas = app.personas.map((p) => {
+    const real = CTX.reales.get(`${app.semana.inicio}|${p.id}`) ?? null;
+    const plan = planif.has(p.id) ? planif.get(p.id) : null;
+    return { ...p, plan, real, desvio: real !== null && plan ? ((real - plan) / plan) * 100 : null };
+  }).sort((a, b) => (b.plan !== null) - (a.plan !== null) || a.area.localeCompare(b.area, 'es') || a.nombre.localeCompare(b.nombre, 'es'));
+  tabla(cont, {
+    rows: filas, vacio: 'Sin personas registradas.',
+    cols: [
+      { key: 'nombre', label: 'Persona', render: (p) => `<span class="nom">${esc(p.nombre)}</span><span class="tenue bloque">${esc(p.area)}</span>` },
+      { key: 'jornada', label: 'Jornada semanal', alinear: 'num', render: (p) => `<input class="in-jornada" type="number" min="1" max="80" step="1" data-jornada="${p.id}" value="${p.jornada}" aria-label="Jornada semanal de ${esc(p.nombre)}"> h` },
+      { key: 'capDia', label: 'Capacidad diaria', alinear: 'num', sort: (p) => p.jornada, render: (p) => horas(capacidadDia(p.jornada)) },
+      { key: 'plan', label: 'Planificadas', alinear: 'num', render: (p) => (p.plan === null ? '<span class="tenue">Sin planificación</span>' : horas(p.plan)) },
+      { key: 'real', label: 'Horas reales', alinear: 'num', render: (p) => `<input class="in-real" type="number" min="0" max="120" step="0.5" inputmode="decimal" data-real="${p.id}" value="${p.real ?? ''}" placeholder="—" aria-label="Horas reales de ${esc(p.nombre)}">` },
+      { key: 'desvio', label: 'Desvío', alinear: 'num', render: (p) => (p.desvio === null ? '<span class="tenue">—</span>' : `<span class="${Math.abs(p.desvio) > 15 ? 'd-mal' : ''}">${signo(p.desvio, '%')}</span>`) },
+    ],
+  });
+  if (cont.dataset.conectado) return;   // el contenedor se conserva: un solo escucha por delegación
+  cont.dataset.conectado = '1';
+  const guardarCon = async (inp, fn) => { inp.disabled = true; try { await fn(); olvidarSituaciones(); } catch (e) { aviso(e.message, 'error'); inp.disabled = false; } };
+  cont.addEventListener('change', (e) => {
+    const inp = e.target;
+    if (inp.dataset.jornada) {
+      const v = Number(inp.value);
+      if (!(v > 0 && v <= 80)) { inp.classList.add('invalido'); return; }
+      inp.classList.remove('invalido');
+      guardarCon(inp, async () => {
+        await db.guardarJornada(inp.dataset.jornada, v);
+        app.actualizarPersona(inp.dataset.jornada, { jornada: v });
+        const p = app.personas.find((x) => x.id === inp.dataset.jornada); if (p) p.jornada = v;
+        aviso(`Jornada actualizada: ${v} h semanales.`);
+        capacidad(cont, app);
+      });
+    } else if (inp.dataset.real) {
+      const v = inp.value === '' ? null : Number(inp.value);
+      if (v !== null && (isNaN(v) || v < 0 || v > 120)) { inp.classList.add('invalido'); return; }
+      inp.classList.remove('invalido');
+      guardarCon(inp, async () => {
+        await db.guardarHorasReales(app.semana.id, inp.dataset.real, v);
+        const k = `${app.semana.inicio}|${inp.dataset.real}`;
+        if (v === null) CTX.reales.delete(k); else CTX.reales.set(k, v);
+        aviso('Horas reales guardadas.');
+        capacidad(cont, app);
+      });
+    }
+  });
 }
 
 async function claveCampo(cont) {

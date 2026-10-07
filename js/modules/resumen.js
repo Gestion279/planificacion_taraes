@@ -1,52 +1,44 @@
 // =====================================================================
-// 📊 Resumen — vista ejecutiva de la semana seleccionada.
-// Es el lugar PRINCIPAL de los indicadores de semana.
+// 📊 Resumen — portada ejecutiva: ¿qué debería mirar Gerencia esta semana?
+//   A. Indicadores principales (sin repetir el detalle de otras hojas)
+//   B. Situaciones que requieren atención (las más importantes; el detalle está en Riesgos y auditoría)
+//   C. Planificación cargada por semana (histórico completo, se mantiene)
+//   D. Principales oportunidades de mejora (síntesis; el detalle está en Propuestas de mejora)
 // =====================================================================
-import { kpisSemana, statsPersonas, auditoria, recomendaciones, coberturaCarga, groupBy, cumplimientoCarga } from '../engine.js';
-import { esc, num, horas, porc, signo, rangoSemana, nivelBadge, fechaCorta, etiquetaSemana } from '../ui.js';
+import { kpisSemana, cumplimientoCarga, analisisRepetitivas, GRUPOS, grupoPropuesta, ordenPropuesta, ESTADOS_ACTIVOS, CONFIG } from '../engine.js';
+import { esc, num, horas, porc, signo, rangoSemana, fechaCorta, situacionHTML, grupoBadge } from '../ui.js';
+import { situacionesSemana } from '../situaciones.js';
+import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
 
 export const titulo = 'Resumen';
+const MAX_SITUACIONES = 6;
 
-function delta(actual, previo, { suf = '', invertir = false } = {}) {
+function delta(actual, previo, { suf = '', invertir = false, texto = 'vs semana anterior' } = {}) {
   if (previo === null || previo === undefined || actual === null || actual === undefined) return '';
   const d = actual - previo;
   if (Math.abs(d) < 0.05) return '<span class="delta">igual que la semana anterior</span>';
   const bueno = invertir ? d < 0 : d > 0;
-  return `<span class="delta ${bueno ? 'd-bien' : 'd-mal'}">${signo(d, suf)} vs semana anterior</span>`;
+  return `<span class="delta ${bueno ? 'd-bien' : 'd-mal'}">${signo(d, suf)} ${texto}</span>`;
 }
 
 export async function render(el, app) {
   const k = kpisSemana(app.filas);
   const hayPrevia = app.filasPrevia.length > 0;
   const kp = hayPrevia ? kpisSemana(app.filasPrevia) : {};
+  const { lista, cobertura: cob, rango } = await situacionesSemana(app);
+  const criticas = lista.filter((s) => s.nivel === 'critica').length;
+  const propuestas = app.propuestasVisibles();
+  const activas = propuestas.filter((p) => ESTADOS_ACTIVOS.includes(p.estado));
+  const implementadas = propuestas.filter((p) => p.estado === 'Implementada').length;
+  const cumplMedible = k.cumplimiento !== null && k.cobertura >= CONFIG.coberturaMin;
 
-  // Promedio histórico (8 semanas anteriores) para detectar cargas fuera de lo habitual
-  const periodo = app.semanasDePeriodo({ tipo: 'n', n: 9 });
-  const { rows: rango } = await app.filasDe(periodo);
-  const historico = rango.filter((r) => r.semana !== app.semana.inicio);
-  const nHist = new Set(historico.map((r) => r.semana)).size;
-  const promPersona = new Map(statsPersonas(historico, { semanas: nHist }).map((p) => [p.persona, p]));
-  const stats = statsPersonas(app.filas);
-  const desvios = stats.map((p) => {
-    const h = promPersona.get(p.persona);
-    return h && h.semanas >= 2 && h.horas > 0 && p.horas > 0 ? { ...p, prom: h.horas, var: ((p.horas - h.horas) / h.horas) * 100 } : null;
-  }).filter((x) => x && Math.abs(x.var) >= 25).sort((a, b) => Math.abs(b.var) - Math.abs(a.var)).slice(0, 5);
-
-  // cobertura de carga: quienes planificaron en cualquier semana anterior (las mismas personas del cuadro
-  // "Planificación cargada por semana", con los filtros globales) y esta semana no
-  const cob = coberturaCarga(app.filas, app.personaSemana.filter((r) => r.semana < app.semana.inicio && app.pasa(r)));
-
-  const alertasTop = k.alertas.filter((a) => a.nivel !== 'info');
-  const porRegla = groupBy(alertasTop, (a) => a.nombre);
-  const aud = auditoria(app.filas, app.semana.inicio).filter((r) => r.grave && r.items.length).sort((a, b) => b.items.length - a.items.length);
-  const recs = recomendaciones({ rows: app.filas, rangeRows: rango }).slice(0, 4);
-  const sobre = stats.filter((p) => p.ocupacion > 110).length;
-
+  // lectura en una frase: qué pasó y qué mirar primero
   const situacion = [
-    `${k.personas} personas planificaron ${num(k.actividades, 0)} actividades por ${horas(k.horas)}.`,
-    sobre ? `${sobre} ${sobre === 1 ? 'persona supera' : 'personas superan'} la jornada de referencia.` : 'Nadie supera la jornada de referencia.',
-    k.cumplimiento === null ? 'Todavía no hay estados cargados para medir el cumplimiento.' : `El cumplimiento es del ${porc(k.cumplimiento)} sobre el ${porc(k.cobertura)} de actividades con estado.`,
-  ].join(' ');
+    `${k.personas} ${k.personas === 1 ? 'persona planificó' : 'personas planificaron'} ${horas(k.horas)}${k.capacidad ? `, el ${porc(k.ocupacion)} de su capacidad estimada` : ''}.`,
+    cob.faltan.length ? `Falta la planificación de ${cob.faltan.length} ${cob.faltan.length === 1 ? 'persona habitual' : 'personas habituales'}.` : '',
+    k.sobrecarga ? `${k.sobrecarga} ${k.sobrecarga === 1 ? 'persona supera' : 'personas superan'} su capacidad.` : 'Nadie supera su capacidad semanal.',
+    !cumplMedible ? `El cumplimiento no se puede medir: solo el ${porc(k.cobertura)} de las actividades tiene Estado.` : `El cumplimiento es del ${porc(k.cumplimiento)}.`,
+  ].filter(Boolean).join(' ');
 
   el.innerHTML = `
   <header class="mod-cab">
@@ -54,13 +46,19 @@ export async function render(el, app) {
     <p class="sub">${rangoSemana(app.semana.inicio, app.semana.fin)}</p>
   </header>
 
-  <section class="kpis" aria-label="Indicadores de la semana">
-    <div class="kpi"><span class="kpi-l">Actividades</span><span class="kpi-v">${num(k.actividades, 0)}</span>${delta(k.actividades, kp.actividades)}</div>
-    <div class="kpi"><span class="kpi-l">Personas</span><span class="kpi-v">${k.personas}${cob.faltan.length ? `<small> de ${cob.habituales}</small>` : ''}</span>${cob.faltan.length ? `<span class="delta d-mal">${cob.faltan.length} sin planificación cargada</span>` : delta(k.personas, kp.personas)}</div>
-    <div class="kpi"><span class="kpi-l">Horas planificadas</span><span class="kpi-v">${num(k.horas)}<small> h</small></span>${delta(k.horas, kp.horas, { suf: ' h' })}</div>
-    <div class="kpi"><span class="kpi-l">Cumplimiento</span><span class="kpi-v">${k.cumplimiento === null ? '<span class="kpi-nd">Sin datos</span>' : porc(k.cumplimiento)}</span>${k.cumplimiento === null ? '<span class="delta">no hay estados informados</span>' : delta(k.cumplimiento, kp.cumplimiento, { suf: ' pts' })}</div>
-    <div class="kpi"><span class="kpi-l">Cobertura de seguimiento</span><span class="kpi-v">${porc(k.cobertura)}</span><span class="delta">actividades con estado</span></div>
-    <a class="kpi kpi-link ${k.alertasCriticas ? 'kpi-crit' : ''}" href="#/riesgos?tab=alertas"><span class="kpi-l">Alertas críticas</span><span class="kpi-v">${k.alertasCriticas}</span><span class="delta">${k.alertas.length} alertas en total</span></a>
+  <section class="kpis kpis-5" aria-label="Indicadores de la semana">
+    <div class="kpi ${cob.faltan.length ? 'kpi-warn' : ''}"><span class="kpi-l">Planificación recibida</span><span class="kpi-v">${k.personas}<small> de ${Math.max(cob.habituales, k.personas)}</small></span>${cob.faltan.length ? `<span class="delta d-mal">${cob.faltan.length} sin planificación cargada</span>` : '<span class="delta d-bien">todas las personas habituales</span>'}</div>
+    <a class="kpi kpi-link" href="#/planificacion"><span class="kpi-l">Carga del equipo</span><span class="kpi-v">${porc(k.ocupacion)}</span><span class="delta">${num(k.horas)} h de ${num(k.capacidad, 0)} h de capacidad${k.sobrecarga ? `, <span class="d-mal">${k.sobrecarga} con sobrecarga</span>` : ''}</span></a>
+    <div class="kpi ${!cumplMedible ? 'kpi-warn' : ''}"><span class="kpi-l">Cumplimiento</span><span class="kpi-v">${cumplMedible ? porc(k.cumplimiento) : '<span class="kpi-nd">No medible</span>'}</span>${cumplMedible ? delta(k.cumplimiento, kp.cumplimiento, { suf: ' pts' }) : `<span class="delta">solo el ${porc(k.cobertura)} tiene Estado</span>`}</div>
+    <a class="kpi kpi-link ${criticas ? 'kpi-crit' : ''}" href="#/riesgos?tab=situaciones"><span class="kpi-l">Situaciones críticas</span><span class="kpi-v">${criticas}</span><span class="delta">${lista.length} situaciones detectadas en total</span></a>
+    <a class="kpi kpi-link" href="#/mejoras"><span class="kpi-l">Mejoras en curso</span><span class="kpi-v">${activas.length}</span><span class="delta">${app.propuestasDisponibles ? `${implementadas} ${implementadas === 1 ? 'implementada' : 'implementadas'}` : 'falta habilitar el registro'}</span></a>
+  </section>
+  <p class="situacion">${esc(situacion)}</p>
+
+  <section class="panel" aria-labelledby="mirar-t">
+    <header class="panel-cab"><h2 id="mirar-t">¿Qué mirar esta semana?</h2>${lista.length > MAX_SITUACIONES ? `<a href="#/riesgos?tab=situaciones">Ver las ${lista.length} situaciones</a>` : ''}</header>
+    ${lista.length ? `<div class="grid-situ">${lista.slice(0, MAX_SITUACIONES).map((s) => situacionHTML(s, { compacta: true })).join('')}</div>`
+      : '<p class="vacio">No se detectaron situaciones que requieran atención esta semana.</p>'}
   </section>
 
   <section class="panel" aria-labelledby="carga-sem-t">
@@ -69,36 +67,37 @@ export async function render(el, app) {
     <div data-carga-semanal><p class="tenue">Cargando…</p></div>
   </section>
 
-  <p class="situacion">${esc(situacion)}</p>
+  <section class="panel" aria-labelledby="opor-t">
+    <header class="panel-cab"><h2 id="opor-t">Principales oportunidades de mejora</h2><a href="#/mejoras">Ver todas las propuestas</a></header>
+    <div data-oportunidades></div>
+  </section>`;
 
-  <div class="grid-2">
-    <section class="panel">
-      <header class="panel-cab"><h2>Puntos a revisar</h2><a href="#/riesgos?tab=alertas">Todas las alertas</a></header>
-      ${cob.faltan.length ? `<p class="faltan"><span class="badge n-advertencia">Carga incompleta</span> <b>Sin planificación esta semana:</b> ${cob.faltan.map((f) => `${esc(f.persona)} <span class="tenue">(${esc(f.area)}${f.ultima ? `, última: ${etiquetaSemana(f.ultima)}` : ''})</span>`).join(', ')}.</p>` : ''}
-      ${alertasTop.length ? `<ul class="lista-alertas">${[...porRegla].slice(0, 6).map(([regla, as]) => `
-        <li>${nivelBadge(as[0].nivel)} <b>${esc(regla)}</b>
-          <span>${as.slice(0, 3).map((a) => `<a href="#/personas?persona=${encodeURIComponent(a.persona)}">${esc(a.persona)}</a> <span class="tenue">${esc(a.detalle)}</span>`).join('; ')}${as.length > 3 ? `; y ${as.length - 3} más` : ''}</span></li>`).join('')}</ul>`
-        : '<p class="vacio">Sin alertas críticas ni advertencias esta semana.</p>'}
-      ${aud.length ? `<h3 class="subtit">Datos incompletos</h3><ul class="lista-simple">${aud.slice(0, 3).map((r) =>
-        `<li><a href="#/riesgos?tab=auditoria&regla=${r.id}">${esc(r.nombre)}</a>: ${r.items.length} actividades (${porc(r.pct)}), ${r.personas.length} ${r.personas.length === 1 ? 'persona' : 'personas'}</li>`).join('')}</ul>` : ''}
-    </section>
-
-    <section class="panel">
-      <header class="panel-cab"><h2>Carga fuera de lo habitual</h2><a href="#/evolucion">Ver evolución</a></header>
-      ${nHist < 2 ? '<p class="vacio">Se necesitan al menos 2 semanas anteriores para comparar.</p>'
-        : desvios.length ? `<table class="tabla compacta"><thead><tr><th>Persona</th><th class="num">Esta semana</th><th class="num">Promedio</th><th class="num">Variación</th></tr></thead><tbody>
-          ${desvios.map((d) => `<tr><td><a href="#/personas?persona=${encodeURIComponent(d.persona)}">${esc(d.persona)}</a></td><td class="num">${horas(d.horas)}</td><td class="num">${horas(d.prom)}</td><td class="num ${d.var > 0 ? 'd-mal' : 'd-info'}">${signo(d.var, '%')}</td></tr>`).join('')}
-          </tbody></table><p class="nota">Personas cuya carga difiere en más de 25% de su promedio de las últimas ${nHist} semanas. Quien no cargó tiempos aparece en Auditoría.</p>`
-        : `<p class="vacio">La carga de cada persona está dentro de ±25% de su promedio de las últimas ${nHist} semanas.</p>`}
-    </section>
-  </div>
-
-  ${recs.length ? `<section class="panel">
-    <header class="panel-cab"><h2>Recomendaciones</h2></header>
-    <ul class="recs">${recs.map((r) => `<li><span class="rec-motivo">${esc(r.motivo)}</span><p>${esc(r.texto)}</p><a href="#/${r.modulo}">Revisar</a></li>`).join('')}</ul>
-  </section>` : ''}`;
-
+  oportunidades(el.querySelector('[data-oportunidades]'), app, activas, rango);
   await cuadroCargaSemanal(el.querySelector('[data-carga-semanal]'), app);
+}
+
+// Síntesis: primero las propuestas registradas por prioridad (Impacto × Esfuerzo); si hay pocas,
+// se completan con las tareas repetitivas de más horas que todavía no tienen propuesta.
+function oportunidades(cont, app, activas, rango) {
+  const top = [...activas].sort((a, b) => ordenPropuesta(a) - ordenPropuesta(b) || (b.horas_mes_base || 0) - (a.horas_mes_base || 0)).slice(0, 4);
+  const conProp = new Set(app.propuestas.map((p) => p.tarea_clave).filter(Boolean));
+  const nSem = new Set(rango.map((r) => r.semana)).size;
+  const sinEvaluar = top.length >= 4 ? [] : analisisRepetitivas(rango, nSem).filter((t) => t.horasMes && t.tipoSugerido && !conProp.has(t.clave)).slice(0, 4 - top.length);
+  if (!top.length && !sinEvaluar.length) { cont.innerHTML = '<p class="vacio">No hay oportunidades registradas ni tareas repetitivas relevantes en las últimas semanas.</p>'; return; }
+  cont.innerHTML = `<ul class="lista-opor">
+    ${top.map((p) => { const g = grupoPropuesta(p.impacto, p.esfuerzo);
+      return `<li><a href="#/mejoras?propuesta=${p.id}" class="lo-tit">${esc(p.titulo)}</a>
+        <span class="lo-meta">${grupoBadge(g, GRUPOS)} ${p.impacto ? `Impacto ${p.impacto.toLowerCase()}, esfuerzo ${(p.esfuerzo || 'sin evaluar').toLowerCase()}` : 'Impacto y esfuerzo sin evaluar'}</span>
+        <span class="lo-est">${esc(p.estado)}${p.responsable ? `, ${esc(p.responsable)}` : ''}</span></li>`; }).join('')}
+    ${sinEvaluar.map((t) => `<li><span class="lo-tit">${esc(t.tarea)}</span>
+        <span class="lo-meta"><span class="badge n-info">Sin evaluar</span> ${esc(t.tipoSugerido)}: ${num(t.vecesSemana)} veces por semana, ${num(t.horasMes)} h por mes</span>
+        <span class="lo-est"><button type="button" class="btn-mini" data-evaluar="${esc(t.clave)}">Evaluar</button></span></li>`).join('')}
+  </ul>
+  ${sinEvaluar.length ? '<p class="nota">Las horas por mes son las que hoy consume la tarea según la planificación, no un ahorro estimado.</p>' : ''}`;
+  cont.querySelectorAll('[data-evaluar]').forEach((b) => b.addEventListener('click', () => {
+    const t = sinEvaluar.find((x) => x.clave === b.dataset.evaluar);
+    abrirPropuesta(app, { borrador: borradorDeTarea(t, app), alGuardar: () => app.ir('mejoras') });
+  }));
 }
 
 // Cuadro persona × semana: ✓ si esa semana tiene planificación, ✗ si no.
@@ -139,7 +138,7 @@ async function cuadroCargaSemanal(cont, app) {
         ${th('pct', 'cc-pct', 'Cumplimiento<span>semanas con planificación</span>', 'Ordenar por porcentaje de cumplimiento')}
       </tr></thead>
       <tbody>${filas.map((p) => `<tr>
-        <th scope="row" class="cc-persona"><a href="#/personas?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
+        <th scope="row" class="cc-persona"><a href="#/planificacion?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
         ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m ? OK : NO}</td>`).join('')}
         <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
       </tr>`).join('')}</tbody>

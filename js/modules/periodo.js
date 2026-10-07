@@ -1,5 +1,5 @@
 // =====================================================================
-// Período compartido por Evolución, Propuestas de mejora y Tareas repetitivas:
+// Período compartido por Evolución y Propuestas de mejora:
 // al cambiarlo en una hoja, se mantiene en las otras. Área y Persona son filtros
 // globales (barra superior) y ya vienen aplicados en app.filasDe().
 // =====================================================================
