@@ -1,13 +1,13 @@
 // Service worker mínimo: permite instalar la aplicación y abrirla sin conexión.
 // Estrategia "red primero": siempre se intenta traer la versión nueva; la caché
 // solo se usa si no hay conexión. Los datos (Supabase) NUNCA se guardan acá.
-const CACHE = 'planificacion-v11';
+const CACHE = 'planificacion-v12';
 const SHELL = [
   '/', '/index.html', '/css/app.css', '/manifest.webmanifest',
   '/js/app.js', '/js/db.js', '/js/engine.js', '/js/excel.js', '/js/legacy.js', '/js/ui.js', '/js/detalle.js',
   '/js/situaciones.js', '/js/propuesta.js',
   '/js/modules/resumen.js', '/js/modules/planificacion.js',
-  '/js/modules/riesgos.js', '/js/modules/evolucion.js', '/js/modules/mejoras.js',
+  '/js/modules/riesgos.js', '/js/modules/evolucion.js', '/js/modules/mejoras.js', '/js/modules/repetitivas.js',
   '/js/modules/periodo.js', '/js/modules/carga.js',
   '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
