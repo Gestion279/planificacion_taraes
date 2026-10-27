@@ -19,6 +19,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/app.css">
+  <style>
+    /* Filtro de semanas del cuadro "Planificación cargada por semana" (solo afecta a ese cuadro) */
+    .cc-filtro { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-right: auto; font-size: 12.5px; color: var(--tinta-2); }
+    .cc-filtro label { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; }
+    .cc-filtro select { min-height: 28px; padding: 2px 6px; font-size: 12.5px; }
+    .cc-filtro.activo select { border-color: var(--bluffs); box-shadow: inset 0 0 0 1px var(--bluffs); }
+    .cc-filtro-todas { all: unset; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--bluffs-txt, #9A6232); }
+    .cc-filtro-todas:hover { text-decoration: underline; }
+    .cc-filtro-todas:focus-visible { outline: 2px solid var(--bluffs); outline-offset: 2px; }
+    .cuadro-carga .cc-oculta { display: none !important; }
+    .cc-sin-dato { background: var(--lienzo); color: var(--tinta-3); }
+  </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" defer></script>
   <script>
@@ -78,5 +90,186 @@
     <main id="contenido" tabindex="-1" aria-live="polite"></main>
   </div>
   <noscript>Esta aplicación necesita JavaScript.</noscript>
+  <script>
+    // =====================================================================
+    // Cuadro "Planificación cargada por semana":
+    //  1) al aparecer, la barra de desplazamiento queda al final (se ven las últimas semanas);
+    //  2) filtro Desde/Hasta junto al título;
+    //  3) con el filtro activo, el Cumplimiento se recalcula solo con las semanas elegidas.
+    // Trabaja sobre la tabla ya dibujada y no toca los datos ni los filtros globales.
+    // =====================================================================
+    (function () {
+      'use strict';
+      var estado = { desde: null, hasta: null };   // claves de semana elegidas (null = todas)
+      var contenedoresVistos = new WeakSet();
+      var observador;
+
+      function claseSemaforo(p) { return p < 25 ? 's-rojo' : p < 50 ? 's-naranja' : p < 75 ? 's-amarillo' : 's-verde'; }
+
+      // Columnas de semana: todas las del encabezado menos Persona y Cumplimiento
+      function semanasDe(tabla) {
+        var cab = tabla.tHead && tabla.tHead.rows[tabla.tHead.rows.length - 1];
+        if (!cab) return [];
+        var out = [];
+        Array.prototype.forEach.call(cab.cells, function (th, i) {
+          if (th.classList.contains('cc-persona') || th.classList.contains('cc-pct')) return;
+          var sp = th.querySelector('span');
+          var fecha = sp ? sp.textContent.trim() : '';
+          var n = th.textContent.replace(fecha, '').replace('⇅', '').trim();
+          out.push({ i: i, n: n, fecha: fecha, clave: n + '|' + fecha });
+        });
+        return out;
+      }
+
+      function rango(sems) {
+        var claves = sems.map(function (s) { return s.clave; });
+        var d = estado.desde ? claves.indexOf(estado.desde) : -1;
+        var h = estado.hasta ? claves.indexOf(estado.hasta) : -1;
+        if (d < 0) d = 0;
+        if (h < 0) h = sems.length - 1;
+        if (d > h) { var t = d; d = h; h = t; }
+        return { d: d, h: h, activo: d > 0 || h < sems.length - 1 };
+      }
+
+      function irAlFinal(tabla) {
+        var sc = tabla.closest('.cc-scroll') || tabla.parentElement;
+        if (sc) sc.scrollLeft = sc.scrollWidth;
+      }
+
+      function procesar(tabla) {
+        var sems = semanasDe(tabla);
+        if (!sems.length) return;
+        var r = rango(sems);
+        var visibles = new Set(), deSemana = new Set();
+        sems.forEach(function (s, k) { deSemana.add(s.i); if (k >= r.d && k <= r.h) visibles.add(s.i); });
+        tabla.dataset.ccActivo = r.activo ? '1' : '';
+
+        // Mostrar u ocultar columnas
+        Array.prototype.forEach.call(tabla.rows, function (fila) {
+          Array.prototype.forEach.call(fila.cells, function (c, i) {
+            if (deSemana.has(i)) c.classList.toggle('cc-oculta', r.activo && !visibles.has(i));
+          });
+        });
+
+        // Cumplimiento: original sin filtro; recalculado con filtro
+        Array.prototype.forEach.call(tabla.tBodies, function (tb) {
+          Array.prototype.forEach.call(tb.rows, function (fila) {
+            var celda = fila.querySelector('.cc-pct');
+            if (!celda) return;
+            if (!('ccOrig' in celda.dataset)) celda.dataset.ccOrig = celda.innerHTML;
+            if (!r.activo) {
+              if (celda.dataset.ccMod) { celda.innerHTML = celda.dataset.ccOrig; delete celda.dataset.ccMod; }
+              delete fila.dataset.ccPct;
+              return;
+            }
+            var ok = 0, tot = 0;
+            visibles.forEach(function (i) {
+              var c = fila.cells[i];
+              if (!c) return;
+              if (c.querySelector('.ico-ok')) { ok++; tot++; }
+              else if (c.querySelector('.ico-no')) tot++;
+            });
+            var p = tot ? Math.round((ok / tot) * 100) : null;
+            fila.dataset.ccPct = p === null ? -1 : p;
+            celda.innerHTML = (p === null
+              ? '<span class="sem-pill cc-sin-dato">—</span>'
+              : '<span class="sem-pill ' + claseSemaforo(p) + '">' + p + '%</span>')
+              + '<span class="cc-frac">' + ok + '/' + tot + '</span>';
+            celda.dataset.ccMod = '1';
+          });
+        });
+
+        filtro(tabla, sems, r);
+
+        // Primera vez que aparece el cuadro: barra al final (últimas semanas a la vista)
+        var sc = tabla.closest('.cc-scroll') || tabla.parentElement;
+        if (sc && !contenedoresVistos.has(sc)) { contenedoresVistos.add(sc); irAlFinal(tabla); }
+      }
+
+      function filtro(tabla, sems, r) {
+        var panel = tabla.closest('.panel') || tabla.closest('section');
+        var cab = panel && panel.querySelector('.panel-cab');
+        var h2 = cab && cab.querySelector('h2');
+        if (!h2) return;
+        var f = cab.querySelector('.cc-filtro');
+        if (!f) {
+          f = document.createElement('div');
+          f.className = 'cc-filtro';
+          f.setAttribute('role', 'group');
+          f.setAttribute('aria-label', 'Semanas del cuadro');
+          f.innerHTML = '<label>Desde<select data-cc-desde></select></label>'
+            + '<label>Hasta<select data-cc-hasta></select></label>'
+            + '<button type="button" class="cc-filtro-todas" data-cc-todas hidden>Ver todas</button>';
+          h2.insertAdjacentElement('afterend', f);
+          var selD = f.querySelector('[data-cc-desde]'), selH = f.querySelector('[data-cc-hasta]');
+          var cambiar = function (origen) {
+            var d = selD.selectedIndex, h = selH.selectedIndex;
+            if (d > h) { if (origen === selD) selH.selectedIndex = d; else selD.selectedIndex = h; }
+            d = selD.selectedIndex; h = selH.selectedIndex;
+            var todas = d === 0 && h === selH.options.length - 1;
+            estado.desde = todas ? null : selD.value;
+            estado.hasta = todas ? null : selH.value;
+            revisar();
+            var t = panel.querySelector('table.cuadro-carga');
+            if (t) irAlFinal(t);
+          };
+          selD.addEventListener('change', function () { cambiar(selD); });
+          selH.addEventListener('change', function () { cambiar(selH); });
+          f.querySelector('[data-cc-todas]').addEventListener('click', function () {
+            estado.desde = estado.hasta = null; revisar();
+            var t = panel.querySelector('table.cuadro-carga');
+            if (t) irAlFinal(t);
+          });
+        }
+        var selD2 = f.querySelector('[data-cc-desde]'), selH2 = f.querySelector('[data-cc-hasta]');
+        var firma = sems.map(function (s) { return s.clave; }).join(',');
+        if (f.dataset.firma !== firma) {
+          var opts = sems.map(function (s) {
+            var o = document.createElement('option');
+            o.value = s.clave;
+            o.textContent = 'Sem. ' + s.n + (s.fecha ? ' (' + s.fecha + ')' : '');
+            return o.outerHTML;
+          }).join('');
+          selD2.innerHTML = opts; selH2.innerHTML = opts;
+          f.dataset.firma = firma;
+        }
+        selD2.selectedIndex = r.d;
+        selH2.selectedIndex = r.h;
+        f.classList.toggle('activo', r.activo);
+        f.querySelector('[data-cc-todas]').hidden = !r.activo;
+      }
+
+      // Con el filtro activo, ordenar por Cumplimiento usa el porcentaje recalculado
+      document.addEventListener('click', function (e) {
+        var th = e.target.closest && e.target.closest('table.cuadro-carga thead th.cc-pct');
+        if (!th) return;
+        var tabla = th.closest('table');
+        if (!tabla.dataset.ccActivo) return;
+        e.stopPropagation(); e.preventDefault();
+        var dir = tabla.dataset.ccDir === 'desc' ? 'asc' : 'desc';
+        tabla.dataset.ccDir = dir;
+        th.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
+        Array.prototype.forEach.call(tabla.tBodies, function (tb) {
+          var filas = Array.prototype.slice.call(tb.rows);
+          filas.sort(function (a, b) {
+            var x = Number(a.dataset.ccPct), y = Number(b.dataset.ccPct);
+            if (x !== y) return dir === 'desc' ? y - x : x - y;
+            return (a.cells[0] ? a.cells[0].textContent : '').localeCompare(b.cells[0] ? b.cells[0].textContent : '', 'es');
+          });
+          filas.forEach(function (f) { tb.appendChild(f); });
+        });
+      }, true);
+
+      function revisar() {
+        observador.disconnect();
+        try { document.querySelectorAll('table.cuadro-carga').forEach(procesar); }
+        catch (err) { console.error('Filtro de semanas:', err); }
+        finally { observador.observe(document.body, { childList: true, subtree: true }); }
+      }
+
+      observador = new MutationObserver(revisar);
+      revisar();
+    })();
+  </script>
 </body>
 </html>
