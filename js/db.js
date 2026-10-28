@@ -55,6 +55,8 @@ const mapActividad = (r) => ({
   riesgoProb: r.riesgo_prob, riesgoImpacto: r.riesgo_impacto,
   hoja: r.hoja, fila: r.fila_excel, altaPosterior: r.alta_posterior, updatedAt: r.updated_at,
   jornada: n(r.jornada),
+  accion: r.accion || null, accionAuto: !!r.accion_auto, detalle: r.detalle || null,
+  cumplimiento: r.cumplimiento || null, noPlanificada: !!r.no_planificada, origen: r.origen || 'excel',
 });
 const mapCambio = (c) => ({
   id: c.id, fechaHora: c.created_at, tipo: c.tipo, campo: c.campo, antes: c.valor_anterior, despues: c.valor_nuevo,
@@ -77,7 +79,7 @@ async function todo(consulta) {
 }
 
 // Para semanas que no son la seleccionada alcanza con las columnas de análisis (menos datos por la red)
-const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada';
+const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada,horas_reales,accion,cumplimiento,no_planificada,origen';
 
 // Una fila por persona y semana con planificación (cuadro de cumplimiento de carga)
 export async function personaSemana() {

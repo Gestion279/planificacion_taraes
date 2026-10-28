@@ -72,7 +72,13 @@ export const tieneRiesgo = (r) => !!(r.riesgos && r.riesgos.trim());
 export const tieneRecursos = (r) => !!(r.recursos && r.recursos.trim());
 
 // Estado: el texto es libre en el Excel; se clasifica con las mismas reglas del Histórico.
+// El cumplimiento cargado en Carga semanal (0, 25, 50, 75, 100 o reprogramada) tiene prioridad sobre el Estado del Excel.
 export function estadoDe(r) {
+  if (r.cumplimiento) {
+    if (r.cumplimiento === 'reprogramada') return 'Reprogramada';
+    const v = Number(r.cumplimiento);
+    return v >= 100 ? 'Cumplida' : v <= 0 ? 'Pendiente' : 'Parcial';
+  }
   const t = norm(r.estado);
   if (!t) return 'Sin estado';
   if (/cancelad|anulad|suspendid/.test(t)) return 'Cancelada';
@@ -82,9 +88,22 @@ export function estadoDe(r) {
   return 'Otro';
 }
 const ESTADO_SCORE = { Cumplida: 1, 'En curso': 0.5, Pendiente: 0 };
+// Puntaje de una actividad (0 a 1); undefined si no cuenta (cancelada, reprogramada, sin estado u otro)
+export function puntajeDe(r) {
+  if (r.cumplimiento && r.cumplimiento !== 'reprogramada') return Number(r.cumplimiento) / 100;
+  return ESTADO_SCORE[estadoDe(r)];
+}
+// Cumplimiento ponderado por las horas planificadas de cada actividad (1 h si no tiene tiempo)
+function cumplimientoDe(rows) {
+  const ps = rows.map((r) => [puntajeDe(r), r.horas || r.real || 1]).filter(([p]) => p !== undefined);
+  if (!ps.length) return null;
+  return (sum(ps, ([p, w]) => p * w) / sum(ps, ([, w]) => w)) * 100;
+}
+// Texto a mostrar en la columna Estado: el porcentaje de Carga semanal o el Estado del Excel
+export const estadoTexto = (r) => (r.cumplimiento ? (r.cumplimiento === 'reprogramada' ? 'Reprogramada' : `${r.cumplimiento}%`) : (r.estado || ''));
 // Cancelada no cuenta para el cumplimiento. Valores acordados para la columna Estado del Excel:
 export const ESTADOS_EXCEL = ['Pendiente', 'En curso', 'Cumplida', 'Cancelada'];
-export const ESTADOS = ['Cumplida', 'En curso', 'Pendiente', 'Cancelada', 'Otro', 'Sin estado'];
+export const ESTADOS = ['Cumplida', 'Parcial', 'En curso', 'Pendiente', 'Reprogramada', 'Cancelada', 'Otro', 'Sin estado'];
 
 // ---------- clave de tarea: ÚNICA definición de "misma tarea" para repetitivas y propuestas ----------
 const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'a', 'en', 'con', 'para', 'por',
@@ -145,7 +164,6 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
     const horas = sum(rs, (r) => r.horas);
     const nSem = semanas > 1 ? new Set(rs.map((r) => r.semana)).size || 1 : 1;
     const conEstado = rs.filter((r) => estadoDe(r) !== 'Sin estado');
-    const puntuables = rs.map((r) => ESTADO_SCORE[estadoDe(r)]).filter((v) => v !== undefined);
     const jornada = Number(rs[0].jornada) || CONFIG.jornada;
     // horas reales: total por persona y semana (se cargan en Carga)
     const semanasP = [...new Set(rs.map((r) => r.semana))];
@@ -168,7 +186,7 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
       capDia: capacidadDia(jornada),
       ocupacion: pct(horas / nSem, jornada),
       semanas: nSem,
-      cumplimiento: puntuables.length ? (sum(puntuables) / puntuables.length) * 100 : null,
+      cumplimiento: cumplimientoDe(rs),
       cobertura: pct(conEstado.length, rs.length),
       pendientes: rs.filter((r) => estadoDe(r) === 'Pendiente'),
       horasReales: semConReal.length ? realTotal / nSem : null,
@@ -192,7 +210,6 @@ export function statsPersonas(rows, { semanas = 1 } = {}) {
 // Indicadores de una semana
 // =====================================================================
 export function kpisSemana(rows) {
-  const puntuables = rows.map((r) => ESTADO_SCORE[estadoDe(r)]).filter((v) => v !== undefined);
   const al = alertas(rows);
   const stats = statsPersonas(rows);
   const capacidad = sum(stats, (p) => p.jornada);
@@ -204,7 +221,7 @@ export function kpisSemana(rows) {
     ocupacion: pct(sum(rows, (r) => r.horas), capacidad),
     sobrecarga: stats.filter((p) => p.ocupacion > CONFIG.ocupAlta).length,
     bajaUtilizacion: stats.filter((p) => p.horas > 0 && p.ocupacion < CONFIG.ocupBaja).length,
-    cumplimiento: puntuables.length ? (sum(puntuables) / puntuables.length) * 100 : null,
+    cumplimiento: cumplimientoDe(rows),
     cobertura: pct(rows.filter((r) => estadoDe(r) !== 'Sin estado').length, rows.length),
     alertasCriticas: al.filter((a) => a.nivel === 'critica').length,
     alertas: al,
@@ -667,9 +684,9 @@ export function hallazgos({ rows, historico = [], cambios = [], cobertura = null
   if (cob !== null && cob < CONFIG.coberturaMin) {
     add({ id: 'cumplimiento_no_medible', fuente: 'Cumplimiento', nivel: cob < 20 ? 'critica' : 'advertencia', tipo: 'Mejorar control', titulo: 'El cumplimiento no se puede medir',
       que: `Solo el ${Math.round(cob)}% de las actividades tiene el Estado informado.`,
-      causa: 'La columna Estado del Excel no se completa de forma habitual.',
+      causa: 'El cumplimiento (en Carga semanal) o el Estado (en el Excel) no se completan de forma habitual.',
       impacto: 'No se pueden detectar tareas pendientes ni vencidas, ni saber si lo planificado se cumplió.',
-      accion: 'Pedir que cada persona actualice el Estado (Pendiente, En curso, Cumplida o Cancelada) al cierre de la semana.' });
+      accion: 'Pedir que cada persona cargue el cumplimiento de sus tareas en Carga semanal al cierre de la semana.' });
   }
   const pend = porRegla.get('incumplimiento') || [];
   if (pend.length) {
@@ -889,4 +906,136 @@ export function cumplimientoCarga(registros, semanas) {
     return { ...p, conPlan, total, pct, nivel: nivelSemaforo(pct) };
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
   return { semanas: semanas.map((inicio, i) => ({ numero: i + 1, inicio })), personas };
+}
+
+// =====================================================================
+// Análisis por acción (lista de acciones de Carga semanal y reclasificación del historial)
+// Compara DEDICACIÓN (horas por semana), no tiempo por tarea: cada persona divide su trabajo
+// en tareas de distinto tamaño, así que el promedio por tarea no es comparable entre personas.
+// =====================================================================
+export const FAMILIAS = [
+  { id: 'registro', nombre: 'Registro y documentación', acciones: ['Registrar', 'Elaborar', 'Informar', 'Archivar', 'Emitir'] },
+  { id: 'control', nombre: 'Control', acciones: ['Controlar', 'Conciliar', 'Evaluar'] },
+  { id: 'compras', nombre: 'Compras y pagos', acciones: ['Comprar', 'Solicitar', 'Pagar o cobrar', 'Reclamar'] },
+  { id: 'coordinacion', nombre: 'Coordinación', acciones: ['Coordinar y dar seguimiento', 'Atender', 'Comunicar', 'Planificar', 'Reunirse'] },
+  { id: 'operacion', nombre: 'Operación', acciones: ['Ejecutar', 'Entregar o retirar'] },
+  { id: 'comercial', nombre: 'Comercial y obras', acciones: ['Presupuestar', 'Certificar', 'Presentar', 'Licitar'] },
+  { id: 'mejora', nombre: 'Mejora', acciones: ['Desarrollar o mejorar'] },
+];
+export const SIN_ACCION = 'Sin acción';
+export const familiaDe = (accion) => FAMILIAS.find((f) => f.acciones.includes(accion))?.id || 'sin';
+
+// Horas por acción con su peso y el porcentaje acumulado (Pareto)
+export function horasPorAccion(rows) {
+  const total = sum(rows, (r) => r.horas);
+  let acum = 0;
+  return [...groupBy(rows, (r) => r.accion || SIN_ACCION)].map(([accion, rs]) => ({
+    accion, horas: sum(rs, (r) => r.horas), tareas: rs.length, personas: new Set(rs.map((r) => r.persona)).size,
+  })).sort((a, b) => b.horas - a.horas).map((a) => {
+    acum += a.horas;
+    return { ...a, pct: total ? (a.horas / total) * 100 : 0, acumulado: total ? (acum / total) * 100 : 0 };
+  });
+}
+
+// Reparto semanal de horas por familia de acciones (% de las horas de cada semana)
+export function familiasPorSemana(rows, iso) {
+  const porSem = groupBy(rows, (r) => r.semana);
+  return iso.map((semana) => {
+    const rs = porSem.get(semana) || [];
+    const total = sum(rs, (r) => r.horas);
+    const pcts = {};
+    [...FAMILIAS.map((f) => f.id), 'sin'].forEach((id) => { pcts[id] = total ? (sum(rs.filter((r) => familiaDe(r.accion) === id), (r) => r.horas) / total) * 100 : null; });
+    return { semana, total, pcts };
+  });
+}
+
+// Matriz persona × acción: horas acumuladas y horas por semana planificada de cada persona
+export function matrizDedicacion(rows) {
+  return [...groupBy(rows, (r) => r.persona)].map(([persona, rs]) => {
+    const semanas = new Set(rs.map((r) => r.semana)).size;
+    const jornada = Math.max(...rs.map((r) => r.jornada || 0)) || CONFIG.jornada;
+    const celdas = {};
+    for (const [accion, ts] of groupBy(rs, (r) => r.accion || SIN_ACCION)) {
+      const horas = sum(ts, (r) => r.horas);
+      celdas[accion] = { horas, horasSemana: horas / semanas, pctJornada: (horas / semanas / jornada) * 100, tareas: ts.length, rows: ts };
+    }
+    const horas = sum(rs, (r) => r.horas);
+    return { persona, area: areasDe(rs).join(', '), semanas, jornada, horas, horasSemana: horas / semanas, pctJornada: (horas / semanas / jornada) * 100, celdas };
+  }).sort((a, b) => b.horasSemana - a.horasSemana || a.persona.localeCompare(b.persona, 'es'));
+}
+
+// Tareas repetitivas agrupadas por acción: misma persona y misma tarea en al menos minSemanas semanas
+export function repetitivasPorAccion(rows, nSemanas = 1, minSemanas = 2) {
+  const semanas = Math.max(1, nSemanas);
+  const items = [];
+  for (const [, rs] of groupBy(rows.filter((r) => r.tarea), (r) => `${r.persona}|${claveDe(r)}`)) {
+    const sems = new Set(rs.map((r) => r.semana)).size;
+    if (sems < minSemanas) continue;
+    const clave = claveDe(rs[0]);
+    if (!clave) continue;
+    const tarea = [...groupBy(rs, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const accion = [...groupBy(rs, (r) => r.accion || SIN_ACCION)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const horas = sum(rs, (r) => r.horas);
+    const horasMes = horas > 0 ? (horas / semanas) * CONFIG.semanasPorMes : null;
+    const tipo = tipoSugerido(tarea, clasificar(tarea, true), 1);
+    items.push({ clave, tarea, accion, persona: rs[0].persona, personas: [rs[0].persona], areas: areasDe(rs), veces: rs.length, semanas: sems,
+      horas, horasSemana: horas / sems, vecesSemana: rs.length / semanas, horasMes, sinHoras: rs.filter((r) => !r.horas).length,
+      tipoSugerido: tipo, oportunidad: !!tipo && horasMes >= CONFIG.oportunidadHorasMes });
+  }
+  const total = sum(items, (t) => t.horas);
+  return [...groupBy(items, (t) => t.accion)].map(([accion, ts]) => ({
+    accion, items: ts.sort((a, b) => b.horas - a.horas || b.veces - a.veces), tareas: ts.length,
+    personas: new Set(ts.map((t) => t.persona)).size, horas: sum(ts, (t) => t.horas), pct: total ? (sum(ts, (t) => t.horas) / total) * 100 : 0,
+  })).sort((a, b) => b.horas - a.horas || b.tareas - a.tareas);
+}
+
+// Misma tarea hecha por distintas personas, con el detalle por persona. Agrupa tareas con la misma
+// clave o parecidas (≥ 2 palabras y ≥ 60% en común, el mismo criterio de tareasEntrePersonas).
+// h por semana = horas de la persona en esa tarea / semanas en que la hizo.
+export function mismaTareaPorPersona(rows, minSemanas = 2) {
+  const unicas = [...groupBy(rows.filter((r) => r.tarea), claveDe)].filter(([clave]) => clave).map(([clave, rs]) => ({ clave, rs }));
+  const n = unicas.length, padre = unicas.map((_, i) => i);
+  const raiz = (x) => { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; };
+  const toks = unicas.map((t) => new Set(t.clave.split(' ').filter(Boolean)));
+  for (let i = 0; i < n; i++) {
+    if (!toks[i].size) continue;
+    for (let j = i + 1; j < n; j++) {
+      if (!toks[j].size) continue;
+      let inter = 0; for (const w of toks[i]) if (toks[j].has(w)) inter++;
+      if (inter >= 2 && inter / Math.max(toks[i].size, toks[j].size) >= 0.6) { const a = raiz(i), b = raiz(j); if (a !== b) padre[a] = b; }
+    }
+  }
+  const grupos = new Map();
+  unicas.forEach((t, i) => { const r = raiz(i); if (!grupos.has(r)) grupos.set(r, []); grupos.get(r).push(...t.rs); });
+  const out = [];
+  for (const rs of grupos.values()) {
+    const personas = [...groupBy(rs, (r) => r.persona)].map(([persona, ts]) => {
+      const semanas = new Set(ts.map((r) => r.semana)).size;
+      const horas = sum(ts, (r) => r.horas);
+      return { persona, semanas, horas, horasSemana: semanas ? horas / semanas : 0 };
+    }).filter((p) => p.semanas >= minSemanas && p.horas > 0).sort((a, b) => b.horasSemana - a.horasSemana);
+    if (personas.length < 2) continue;
+    const tarea = [...groupBy(rs, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const accion = [...groupBy(rs, (r) => r.accion || SIN_ACCION)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const max = personas[0].horasSemana, min = personas.at(-1).horasSemana;
+    out.push({ tarea, accion, personas, horas: sum(personas, (p) => p.horas), relacion: min ? max / min : null });
+  }
+  return out.sort((a, b) => b.horas - a.horas);
+}
+
+// Calidad de la planificación por persona en un período
+export function calidadPlanificacion(rows, nSemanas) {
+  return [...groupBy(rows, (r) => r.persona)].map(([persona, rs]) => {
+    const semanas = new Set(rs.map((r) => r.semana)).size;
+    const jornada = Math.max(...rs.map((r) => r.jornada || 0)) || CONFIG.jornada;
+    const horas = sum(rs, (r) => r.horas);
+    const n = rs.length;
+    return {
+      persona, area: areasDe(rs).join(', '), semanas, totalSemanas: nSemanas, horas,
+      ocupacion: semanas ? (horas / (semanas * jornada)) * 100 : null,
+      pctAlta: n ? (rs.filter((r) => prioridadDe(r) === 'Alta').length / n) * 100 : null,
+      pctSinHoras: n ? (rs.filter((r) => !r.horas).length / n) * 100 : null,
+      pctEvaluadas: n ? (rs.filter((r) => estadoDe(r) !== 'Sin estado').length / n) * 100 : null,
+    };
+  }).sort((a, b) => (b.ocupacion ?? -1) - (a.ocupacion ?? -1) || a.persona.localeCompare(b.persona, 'es'));
 }

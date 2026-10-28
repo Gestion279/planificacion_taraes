@@ -6,7 +6,7 @@ export const PALETA = {
   beige: '#BDB8AC', sun: '#F0E3D1', crit: '#A8322D', warn: '#C9962E', ok: '#6F8A5B', tinta: '#2B3436', tinta2: '#5C6769',
 };
 export const COLOR_PRIORIDAD = { Alta: PALETA.bluffs, Media: PALETA.grass, Baja: PALETA.pewter, 'Sin prioridad': '#DDD6C9' };
-export const COLOR_ESTADO = { Cumplida: PALETA.ok, 'En curso': PALETA.grass, Pendiente: PALETA.crit, Otro: PALETA.beige, 'Sin estado': '#E7E1D6' };
+export const COLOR_ESTADO = { Cumplida: PALETA.ok, Parcial: PALETA.warn, 'En curso': PALETA.grass, Pendiente: PALETA.crit, Reprogramada: PALETA.pewter, Cancelada: '#CFC8BA', Otro: PALETA.beige, 'Sin estado': '#E7E1D6' };
 
 export const esc = (s) => (s === null || s === undefined ? '' : String(s))
   .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
