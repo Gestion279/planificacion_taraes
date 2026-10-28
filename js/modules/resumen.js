@@ -4,9 +4,10 @@
 //   B. Situaciones que requieren atención (las más importantes; el detalle está en Riesgos y auditoría)
 //   C. Planificación cargada por semana (histórico completo, se mantiene)
 //   D. Principales oportunidades de mejora (síntesis; el detalle está en Propuestas de mejora)
+//   E. Calidad de la planificación por persona (acumulado de un período, con alertas)
 // =====================================================================
-import { kpisSemana, cumplimientoCarga, analisisRepetitivas, GRUPOS, grupoPropuesta, ordenPropuesta, ESTADOS_ACTIVOS, CONFIG } from '../engine.js';
-import { esc, num, horas, porc, signo, rangoSemana, fechaCorta, situacionHTML, grupoBadge } from '../ui.js';
+import { kpisSemana, cumplimientoCarga, analisisRepetitivas, calidadPlanificacion, GRUPOS, grupoPropuesta, ordenPropuesta, ESTADOS_ACTIVOS, CONFIG } from '../engine.js';
+import { esc, num, horas, porc, signo, rangoSemana, fechaCorta, situacionHTML, grupoBadge, tabla, opciones } from '../ui.js';
 import { situacionesSemana } from '../situaciones.js';
 import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
 
@@ -70,10 +71,53 @@ export async function render(el, app) {
   <section class="panel" aria-labelledby="opor-t">
     <header class="panel-cab"><h2 id="opor-t">Principales oportunidades de mejora</h2><a href="#/mejoras">Ver todas las propuestas</a></header>
     <div data-oportunidades></div>
+  </section>
+
+  <section class="panel" aria-labelledby="calidad-t">
+    <header class="panel-cab"><h2 id="calidad-t">Calidad de la planificación por persona</h2>
+      <form class="filtros filtros-cab" data-calidad-periodo><label>Período<select name="periodo">${opciones(PERIODOS_CALIDAD, CAL.periodo)}</select></label></form></header>
+    <div data-calidad><p class="tenue">Cargando…</p></div>
   </section>`;
 
   oportunidades(el.querySelector('[data-oportunidades]'), app, activas, rango);
   await cuadroCargaSemanal(el.querySelector('[data-carga-semanal]'), app);
+  const contCal = el.querySelector('[data-calidad]');
+  el.querySelector('[data-calidad-periodo]').addEventListener('change', (e) => { CAL.periodo = e.target.value; calidad(contCal, app); });
+  await calidad(contCal, app);
+}
+
+// ---------- E. Calidad de la planificación por persona ----------
+// Acumulado de un período que termina en la semana seleccionada. Señala lo que quita confianza
+// a los indicadores: semanas sin planificar, ocupación baja, demasiadas tareas en Alta, tareas sin horas.
+const PERIODOS_CALIDAD = [['8', 'Últimas 8 semanas'], ['m3', 'Últimos 3 meses'], ['todo', 'Desde el inicio']];
+const CAL = { periodo: '8' };
+const UMBRAL_ALTA = CONFIG.altaShareMax * 100, UMBRAL_SIN_HORAS = 20, UMBRAL_OCUPACION = 60;
+
+async function calidad(cont, app) {
+  const semanas = CAL.periodo === 'todo' ? app.semanasDePeriodo({ tipo: 'n', n: app.semanas.length })
+    : CAL.periodo === 'm3' ? app.semanasDePeriodo({ tipo: 'meses', n: 3 }) : app.semanasDePeriodo({ tipo: 'n', n: 8 });
+  let rows;
+  try { ({ rows } = await app.filasDe(semanas)); } catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  const n = semanas.length;
+  const datos = calidadPlanificacion(rows, n);
+  if (!datos.length) { cont.innerHTML = '<p class="vacio">Sin datos para el período.</p>'; return; }
+  const alerta = (v, umbral, mayor = true) => v !== null && (mayor ? v > umbral : v < umbral);
+  const chip = (txt, al) => `<span class="cal-chip ${al ? 'cal-alerta' : ''}">${txt}</span>`;
+  const barra = (pctV, al) => `<span class="cal-barra" aria-hidden="true"><span class="${al ? 'cal-baja' : ''}" style="width:${Math.min(100, Math.max(0, pctV || 0)).toFixed(0)}%"></span></span>`;
+  const conAlta = datos.filter((d) => alerta(d.pctAlta, UMBRAL_ALTA)).length;
+  cont.innerHTML = `<p class="nota nota-cab">${n} ${n === 1 ? 'semana' : 'semanas'} hasta la semana seleccionada. ${conAlta ? `${conAlta} ${conAlta === 1 ? 'persona marca' : 'personas marcan'} más del ${num(UMBRAL_ALTA, 0)}% de sus tareas como Alta: así la importancia deja de servir para priorizar.` : ''}</p><div data-cal-tabla></div>
+    <p class="nota">Ocupación acumulada: horas planificadas del período sobre la jornada de las semanas planificadas. Se marca para revisar: ocupación menor al ${UMBRAL_OCUPACION}% (planificación incompleta), más del ${num(UMBRAL_ALTA, 0)}% de tareas en Alta o más del ${UMBRAL_SIN_HORAS}% sin horas. Evaluadas: con Estado o cumplimiento cargado.</p>`;
+  tabla(cont.querySelector('[data-cal-tabla]'), {
+    rows: datos, orden: { key: 'ocupacion', dir: -1 },
+    cols: [
+      { key: 'persona', label: 'Persona', render: (d) => `<a class="nom" href="#/planificacion?persona=${encodeURIComponent(d.persona)}">${esc(d.persona)}</a><span class="tenue bloque">${esc(d.area)}</span>` },
+      { key: 'semanas', label: 'Semanas planificadas', alinear: 'num', render: (d) => `<span class="cal-celda">${barra((d.semanas / n) * 100, d.semanas / n < 0.5)}<span>${d.semanas} de ${n}</span></span>` },
+      { key: 'ocupacion', label: 'Ocupación acumulada', alinear: 'num', render: (d) => `<span class="cal-celda">${barra(d.ocupacion, alerta(d.ocupacion, UMBRAL_OCUPACION, false))}<span>${porc(d.ocupacion)}</span></span>` },
+      { key: 'pctAlta', label: 'Tareas en Alta', alinear: 'num', render: (d) => chip(porc(d.pctAlta), alerta(d.pctAlta, UMBRAL_ALTA)) },
+      { key: 'pctSinHoras', label: 'Sin horas', alinear: 'num', render: (d) => chip(porc(d.pctSinHoras), alerta(d.pctSinHoras, UMBRAL_SIN_HORAS)) },
+      { key: 'pctEvaluadas', label: 'Evaluadas', alinear: 'num', render: (d) => chip(porc(d.pctEvaluadas), false) },
+    ],
+  });
 }
 
 // Síntesis: primero las propuestas registradas por prioridad (Impacto × Esfuerzo); si hay pocas,

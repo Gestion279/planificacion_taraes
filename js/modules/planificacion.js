@@ -4,7 +4,7 @@
 // de carga frente a la capacidad diaria estimada y, al seleccionarla, muestra qué la genera.
 // (Incluye el detalle por persona que antes estaba en la hoja Personas.)
 // =====================================================================
-import { DIAS, PRIORIDADES, ESTADOS, diaDe, prioridadDe, estadoDe, repetitivasSemana, claveTarea, norm, CONFIG, cargaDiaria, alertas,
+import { DIAS, PRIORIDADES, ESTADOS, diaDe, prioridadDe, estadoDe, estadoTexto, repetitivasSemana, claveTarea, norm, CONFIG, cargaDiaria, alertas,
   coberturaCarga, NIVELES_DIA, esHabil, statsPersonas, groupBy } from '../engine.js';
 import { esc, num, horas, porc, signo, tabla, barraApilada, prioBadge, multiSelect, COLOR_PRIORIDAD, COLOR_ESTADO, fechaCorta, rangoSemana,
   barraOcupacion, etiquetaSemana, fechaHora, grafico, PALETA, nivelBadge } from '../ui.js';
@@ -95,12 +95,12 @@ export async function render(el, app) {
         { key: 'tarea', label: 'Tarea', clase: 'col-tarea', render: (r) => `${esc(r.tarea) || '<span class="tenue">Sin descripción</span>'}
             ${repetidas.has(`${r.persona}|${claveTarea(r.tarea) || norm(r.tarea)}`) ? '<span class="ico-rep" title="Se repite en la semana">↻</span>' : ''}
             ${modificadas.has(r.id) ? '<span class="ico-mod" title="Modificada después de la primera carga">✎</span>' : ''}
-            ${r.altaPosterior ? '<span class="ico-new" title="Agregada después de la primera carga">＋</span>' : ''}` },
+            ${r.altaPosterior ? `<span class="ico-new" title="${r.noPlanificada ? 'No planificada: agregada durante la semana' : 'Agregada después de la primera carga'}">＋</span>` : ''}` },
         { key: 'prioridad', label: 'Prioridad', sort: (r) => ({ Alta: 1, Media: 2, Baja: 3 }[r.prioridad] || 4), render: (r) => prioBadge(r.prioridad) },
         { key: 'horas', label: 'Tiempo', alinear: 'num', render: (r) => (r.horas ? horas(r.horas) : '<span class="tenue">—</span>') },
         { key: 'recursos', label: 'Recursos', clase: 'col-texto', render: (r) => esc(r.recursos) || '<span class="tenue">—</span>' },
         { key: 'riesgos', label: 'Riesgos', clase: 'col-texto', render: (r) => esc(r.riesgos) || '<span class="tenue">—</span>' },
-        { key: 'estado', label: 'Estado', sort: (r) => estadoDe(r), render: (r) => (r.estado ? `<span class="est e-${norm(estadoDe(r)).replace(/ /g, '-')}">${esc(r.estado)}</span>` : '<span class="tenue">—</span>') },
+        { key: 'estado', label: 'Estado', sort: (r) => estadoDe(r), render: (r) => (estadoTexto(r) ? `<span class="est e-${norm(estadoDe(r)).replace(/ /g, '-')}">${esc(estadoTexto(r))}</span>` : '<span class="tenue">—</span>') },
       ],
     });
   };
@@ -217,7 +217,7 @@ function detalleDia(cont, app, p, dia) {
       { key: 'prioridad', label: 'Prioridad', sort: (r) => ({ Alta: 1, Media: 2, Baja: 3 }[r.prioridad] || 4), render: (r) => prioBadge(r.prioridad) },
       { key: 'horas', label: 'Tiempo', alinear: 'num', render: (r) => (r.horas ? horas(r.horas) : '<span class="tenue">Sin tiempo</span>') },
       { key: 'pctDia', label: '% del día', alinear: 'num', sort: (r) => r.horas || 0, render: (r) => (r.horas && v.horas ? porc((r.horas / v.horas) * 100) : '—') },
-      { key: 'estado', label: 'Estado', render: (r) => esc(r.estado) || '<span class="tenue">—</span>' },
+      { key: 'estado', label: 'Estado', render: (r) => esc(estadoTexto(r)) || '<span class="tenue">—</span>' },
     ],
   });
 }

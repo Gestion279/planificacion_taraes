@@ -4,9 +4,11 @@
 // Una tarea repetitiva NO se convierte sola en propuesta: se señala como posible
 // oportunidad y quien la evalúa decide si registrar una propuesta de mejora.
 // Respeta el período compartido y los filtros globales de área y persona.
+// Dos pestañas: «Por persona» (vista original, sin cambios) y «Por acción» (agrupada por la acción
+// de Carga semanal, con apertura por tarea y la comparación de la misma tarea entre personas).
 // =====================================================================
-import { topRepetitivasPorPersona, CONFIG } from '../engine.js';
-import { esc, num, horas } from '../ui.js';
+import { topRepetitivasPorPersona, repetitivasPorAccion, mismaTareaPorPersona, CONFIG } from '../engine.js';
+import { esc, num, horas, porc, opciones } from '../ui.js';
 import { prepararPeriodo } from './periodo.js';
 import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
 
@@ -16,10 +18,16 @@ export const titulo = 'Tareas repetitivas';
 const ANCHO_MIN = 400, SEPARACION = 14;
 let observador = null;
 
+const TABS = [['persona', 'Por persona'], ['accion', 'Por acción']];
+
 export async function render(el, app) {
   const volver = () => render(el, app);
   const { rows, n, cont } = await prepararPeriodo(el, app, { titulo, alCambiar: volver });
-  if (rows.length) repetitivas(cont, { rows, n, app, volver });
+  const tab = TABS.some(([k]) => k === app.params.tab) ? app.params.tab : 'persona';
+  cont.insertAdjacentHTML('beforebegin', `<nav class="tabs" role="tablist" aria-label="Vista de tareas repetitivas">${TABS.map(([k, l]) => `<a role="tab" href="#/repetitivas${k === 'persona' ? '' : `?tab=${k}`}" aria-selected="${k === tab}">${l}</a>`).join('')}</nav>`);
+  if (!rows.length) return;
+  if (tab === 'accion') porAccion(cont, { rows, n, app, volver });
+  else repetitivas(cont, { rows, n, app, volver });
 }
 
 function repetitivas(cont, { rows, n, app, volver }) {
@@ -81,4 +89,70 @@ function distribuir(grid) {
   observador = new ResizeObserver(() => { if (grid.isConnected) armar(); else observador.disconnect(); });
   observador.observe(grid);
   document.fonts?.ready.then(() => { if (grid.isConnected) armar(true); });
+}
+
+// ---------- Pestaña «Por acción» ----------
+// Tareas que una misma persona planifica en al menos N semanas del período, agrupadas por acción.
+// Cada tarea conserva la marca de posible oportunidad y el botón Evaluar de la vista por persona.
+function porAccion(cont, { rows, n, app, volver }) {
+  const F = app.filtrosHoja('repetitivas', { minSemanas: '' });
+  const opcionesSem = [...new Set([2, 3, 4, 6, 8, 12, 16, 20, Math.max(2, Math.ceil(n / 2)), n].filter((x) => x >= 2 && x <= Math.max(2, n)))].sort((a, b) => a - b);
+  const minSem = opcionesSem.includes(+F.minSemanas) ? +F.minSemanas : Math.max(2, Math.ceil(n / 2));
+  const grupos = repetitivasPorAccion(rows, n, minSem);
+  const comparables = mismaTareaPorPersona(rows, minSem);
+  const totalRep = grupos.reduce((a, g) => a + g.horas, 0);
+  const totalHoras = rows.reduce((a, r) => a + (r.horas || 0), 0);
+  const maxG = Math.max(1, ...grupos.map((g) => g.horas));
+  const propuestaDe = (clave) => app.propuestas.find((p) => p.tarea_clave === clave && p.estado !== 'Descartada');
+
+  cont.innerHTML = `
+  <p class="intro">Tareas que una misma persona planifica en al menos ${minSem} de las ${n} semanas del período, agrupadas por la acción que se realiza. Abrí cada acción para ver sus tareas. Las marcadas como <b>posible oportunidad</b> siguen el mismo criterio que la vista por persona.</p>
+  <form class="filtros filtros-hoja">
+    <label>Repetida en al menos<select name="minSemanas">${opciones(opcionesSem.map((x) => [String(x), `${x} semanas`]), String(minSem))}</select></label>
+  </form>
+  <section class="kpis kpis-3" aria-label="Tareas repetitivas del período">
+    <div class="kpi"><span class="kpi-l">Horas en tareas repetitivas</span><span class="kpi-v">${porc(totalHoras ? (totalRep / totalHoras) * 100 : null)}</span><span class="delta">${num(totalRep, 0)} h de ${num(totalHoras, 0)} h planificadas</span></div>
+    <div class="kpi"><span class="kpi-l">Tareas repetitivas</span><span class="kpi-v">${num(grupos.reduce((a, g) => a + g.tareas, 0), 0)}</span><span class="delta">En ${grupos.length} ${grupos.length === 1 ? 'acción' : 'acciones'}</span></div>
+    <div class="kpi"><span class="kpi-l">Misma tarea en varias personas</span><span class="kpi-v">${comparables.length}</span><span class="delta">Comparables entre sí</span></div>
+  </section>
+  <div class="rep-accion">
+    <section class="panel" aria-labelledby="ra-t">
+      <header class="panel-cab"><h2 id="ra-t">Por acción, con apertura por tarea</h2><span class="tenue">Ordenado por horas acumuladas</span></header>
+      ${!grupos.length ? '<p class="vacio">No hay tareas que se repitan en tantas semanas. Probá con menos semanas.</p>' : grupos.map((g, gi) => `
+      <details class="ra-grupo" ${gi === 0 ? 'open' : ''}>
+        <summary>
+          <span class="ra-nom"><span class="ra-flecha" aria-hidden="true">›</span><b>${esc(g.accion)}</b> <span class="tenue">· ${g.tareas} ${g.tareas === 1 ? 'tarea' : 'tareas'} · ${g.personas} ${g.personas === 1 ? 'persona' : 'personas'}</span></span>
+          <span class="ra-barra" aria-hidden="true"><span style="width:${((g.horas / maxG) * 100).toFixed(1)}%"></span></span>
+          <span class="ra-h">${horas(g.horas)}</span><span class="ra-pct tenue">${porc(g.pct)}</span>
+        </summary>
+        <div class="tabla-scroll"><table class="tabla compacta rep-tabla">
+          <thead><tr><th>Tarea</th><th>Persona</th><th class="num">Veces</th><th class="num">Semanas</th><th class="num">h por semana</th><th class="num">Horas acumuladas</th></tr></thead>
+          <tbody>${g.items.map((t, ti) => { const pr = propuestaDe(t.clave); return `<tr>
+            <td>${esc(t.tarea)}${t.oportunidad || pr ? `<span class="rep-opor">${pr ? `<a href="#/mejoras?propuesta=${pr.id}">Propuesta: ${esc(pr.estado)}</a>`
+              : `Posible oportunidad: ${esc(t.tipoSugerido.toLowerCase())}${app.propuestasDisponibles ? ` <button type="button" class="rep-eval" data-evaluar-acc="${gi}|${ti}">Evaluar</button>` : ''}`}</span>` : ''}</td>
+            <td class="nw">${esc(t.persona)}</td>
+            <td class="num"><b>${t.veces}</b></td>
+            <td class="num">${t.semanas}</td>
+            <td class="num">${t.horas ? horas(t.horasSemana) : '<span class="tenue">—</span>'}</td>
+            <td class="num">${t.horas ? horas(t.horas) : '<span class="tenue">—</span>'}${t.sinHoras && t.horas ? `<span class="tenue bloque" title="Veces sin tiempo cargado">${t.sinHoras} sin tiempo</span>` : ''}</td></tr>`; }).join('')}</tbody>
+        </table></div>
+      </details>`).join('')}
+    </section>
+    <section class="panel" aria-labelledby="rm-t">
+      <header class="panel-cab"><h2 id="rm-t">Misma tarea, distintas personas</h2></header>
+      <p class="nota nota-cab">Tareas repetitivas con el mismo detalle (o muy parecido) que hacen varias personas. Es la comparación de tiempos válida, porque se trata del mismo trabajo. Antes de sacar conclusiones, revisá si el volumen es el mismo.</p>
+      ${!comparables.length ? '<p class="vacio">No hay tareas comparables entre personas en el período.</p>' : `<ul class="rm-lista">${comparables.slice(0, 12).map((c) => {
+        const max = c.personas[0].horasSemana || 1;
+        return `<li><span class="rm-tarea">${esc(c.tarea)}</span><span class="tenue rm-meta">${esc(c.accion)}${c.relacion && c.relacion >= 1.5 ? ` · una persona dedica ${num(c.relacion)} veces más por semana` : ' · tiempos parecidos'}</span>
+          ${c.personas.map((p) => `<span class="rm-fila"><span class="rm-p">${esc(p.persona)}</span><span class="rm-barra" aria-hidden="true"><span style="width:${((p.horasSemana / max) * 100).toFixed(1)}%"></span></span><span class="rm-v">${num(p.horasSemana)} h/sem</span></span>`).join('')}</li>`;
+      }).join('')}</ul>${comparables.length > 12 ? `<p class="nota">Se muestran 12 de ${comparables.length} tareas comparables, las de más horas.</p>` : ''}`}
+      <p class="nota">h/sem: horas de la persona en esa tarea dividido las semanas en que la hizo.</p>
+    </section>
+  </div>`;
+
+  cont.querySelector('.filtros-hoja').addEventListener('change', (e) => { F[e.target.name] = e.target.value; app.guardarFiltrosHoja(); volver(); });
+  cont.querySelectorAll('[data-evaluar-acc]').forEach((b) => b.addEventListener('click', () => {
+    const [gi, ti] = b.dataset.evaluarAcc.split('|').map(Number);
+    abrirPropuesta(app, { borrador: borradorDeTarea(grupos[gi].items[ti], app), alGuardar: volver });
+  }));
 }
