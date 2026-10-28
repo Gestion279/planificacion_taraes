@@ -176,3 +176,63 @@ test('personas por área: el área es la del Excel donde se cargó la actividad'
   assert.equal(cumplimientoCarga(reg.filter((r) => r.area === 'Ventas'), semanas).personas.length, 2);
   assert.equal(cumplimientoCarga(reg.filter((r) => r.area === 'Compras'), semanas).personas.length, 1);
 });
+
+test('carga semanal: el cumplimiento en porcentaje manda sobre el Estado y pondera por horas', () => {
+  assert.equal(E.estadoDe({ cumplimiento: '100', estado: 'Pendiente' }), 'Cumplida');
+  assert.equal(E.estadoDe({ cumplimiento: '50' }), 'Parcial');
+  assert.equal(E.estadoDe({ cumplimiento: '0' }), 'Pendiente');
+  assert.equal(E.estadoDe({ cumplimiento: 'reprogramada' }), 'Reprogramada');
+  assert.equal(E.estadoTexto({ cumplimiento: '75' }), '75%');
+  assert.equal(E.estadoTexto({ estado: 'Cumplida' }), 'Cumplida');
+  assert.equal(E.puntajeDe({ cumplimiento: 'reprogramada' }), undefined);
+  const base = { persona: 'Ana', personaId: 'p1', semana: '2026-11-02', area: 'Gestión', fecha: '2026-11-02', dia: 'Lunes', jornada: 44 };
+  const k = E.kpisSemana([
+    { ...base, id: 1, tarea: 'Informar', horas: 3, cumplimiento: '100' },
+    { ...base, id: 2, tarea: 'Elaborar', horas: 1, cumplimiento: '0' },
+    { ...base, id: 3, tarea: 'Planificar', horas: 2, cumplimiento: 'reprogramada' },
+  ]);
+  assert.equal(Math.round(k.cumplimiento), 75);
+});
+
+test('acciones: Pareto, familias, matriz de dedicación y calidad de la planificación', () => {
+  const r = (x) => ({ semana: '2026-10-05', persona: 'Ana', personaId: 'a', area: 'Gestión', jornada: 40, prioridad: 'Media', estado: null, tarea: 'x', ...x });
+  const rows = [
+    r({ accion: 'Registrar', horas: 6, tarea: 'Carga de rendiciones en Bejerman' }),
+    r({ accion: 'Controlar', horas: 3, prioridad: 'Alta' }),
+    r({ accion: 'Desarrollar o mejorar', horas: 1, semana: '2026-10-12' }),
+    r({ accion: null, horas: null, semana: '2026-10-12' }),
+  ];
+  const p = E.horasPorAccion(rows);
+  assert.equal(p[0].accion, 'Registrar');
+  assert.equal(Math.round(p[0].pct), 60);
+  assert.equal(Math.round(p.at(-1).acumulado), 100);
+  const f = E.familiasPorSemana(rows, ['2026-10-05', '2026-10-12']);
+  assert.equal(Math.round(f[0].pcts.registro), 67);
+  assert.equal(Math.round(f[1].pcts.mejora), 100);
+  const m = E.matrizDedicacion(rows);
+  assert.equal(m[0].semanas, 2);
+  assert.equal(m[0].celdas.Registrar.horasSemana, 3);
+  assert.equal(Math.round(m[0].pctJornada), 13);
+  const c = E.calidadPlanificacion(rows, 4)[0];
+  assert.equal(c.semanas, 2);
+  assert.equal(Math.round(c.ocupacion), 13);
+  assert.equal(c.pctAlta, 25);
+  assert.equal(c.pctSinHoras, 25);
+});
+
+test('repetitivas por acción y misma tarea entre personas', () => {
+  const rows = [];
+  ['2026-09-07', '2026-09-14', '2026-09-21'].forEach((semana) => {
+    rows.push({ semana, persona: 'Luis', area: 'Gestión', accion: 'Registrar', tarea: 'Carga de rendiciones en Bejerman', horas: 8 });
+    rows.push({ semana, persona: 'Eliana', area: 'Gestión', accion: 'Registrar', tarea: 'Carga rendiciones Bejerman', horas: 9 });
+    rows.push({ semana, persona: 'Luis', area: 'Gestión', accion: 'Controlar', tarea: 'Control de cajas', horas: 2 });
+  });
+  const g = E.repetitivasPorAccion(rows, 3, 2);
+  assert.equal(g[0].accion, 'Registrar');
+  assert.equal(g[0].tareas, 2);
+  assert.equal(g[0].items[0].semanas, 3);
+  assert.equal(g[0].items[0].horasSemana, 9);
+  const m = E.mismaTareaPorPersona(rows, 2);
+  assert.equal(m.length, 1);
+  assert.deepEqual(m[0].personas.map((p) => p.persona), ['Eliana', 'Luis']);
+});
