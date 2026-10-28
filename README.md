@@ -53,6 +53,25 @@ La clave de `SUPABASE_ANON_KEY` es la **pública** (publishable) y está pensada
 
 ---
 
+## Carga semanal (aplicación aparte)
+
+La carga de cada persona se hace en una aplicación independiente (repositorio y proyecto de Vercel propios), que usa la misma base de datos. Este informe no tiene enlaces hacia esa app ni esa app hacia el informe, para que el equipo no acceda al informe de gerencia.
+
+- **En el informe:** el cumplimiento cargado en Carga semanal (0, 25, 50, 75, 100 % o Reprogramada) tiene prioridad sobre la columna Estado del Excel, y el cumplimiento se pondera por las horas de cada tarea. Las tareas no planificadas se marcan con ＋.
+- **Excel y Carga semanal conviven:** subir un Excel de una semana solo actualiza las tareas que vinieron de Excel; no toca lo cargado en la app.
+
+El detalle de los cambios en la base está en `docs/CARGA_SEMANAL.md`.
+
+## Indicadores por acción
+
+Cada tarea tiene una **acción** (Registrar, Controlar, Informar…): la elige cada persona en Carga semanal, y el historial de Excel se reclasificó con el mismo criterio. Con eso se suman, sin quitar nada de lo existente:
+
+- **Acciones** (sección nueva): horas del período, Pareto de horas por acción, reparto semanal por familia de acciones y matriz de dedicación persona × acción (horas por semana, % de la jornada u horas acumuladas). Tocando una celda se ven las tareas que la componen.
+- **Tareas repetitivas → pestaña «Por acción»**: las repetitivas agrupadas por acción con apertura por tarea (veces, semanas, horas por semana y acumuladas), con la misma marca de posible oportunidad y el botón Evaluar; y «Misma tarea, distintas personas» para comparar tiempos del mismo trabajo. La pestaña «Por persona» es la vista de siempre.
+- **Resumen → «Calidad de la planificación por persona»**: semanas planificadas, ocupación acumulada, % de tareas en Alta, % sin horas y % evaluadas, con alertas. Se agrega al final; «Planificación cargada por semana» se mantiene igual.
+
+Las comparaciones entre personas usan **dedicación** (horas por semana), no el tiempo por tarea, porque cada persona divide su trabajo en tareas de distinto tamaño.
+
 ## Uso semanal
 
 **Filtros.** En la barra superior, al lado de la semana, están los filtros de **Área** y **Persona** (se pueden elegir varias opciones). Se aplican a todas las hojas y se mantienen al navegar, al cambiar de semana y al recargar la página. Cada hoja puede tener además sus filtros propios (por ejemplo Día, Prioridad y Estado en Planificación, o Nivel en Riesgos), también de selección múltiple. **Limpiar filtros** deshace todas las selecciones juntas; el número indica cuántas hay activas.
