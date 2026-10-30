@@ -776,3 +776,11 @@ a.lo-tit { text-decoration: none; } a.lo-tit:hover { text-decoration: underline;
 .cal-chip { display: inline-block; min-width: 44px; padding: 1px 8px; border-radius: 10px; text-align: center; }
 .cal-chip.cal-alerta { background: var(--warn-f); color: #6E4F12; font-weight: 600; }
 @media (max-width: 860px) { .cal-celda .cal-barra { display: none; } }
+
+/* Índice de calidad: fórmula debajo del título del cuadro */
+.formula-indice { margin: -4px 0 12px; padding: 8px 12px; background: var(--lienzo); border-left: 3px solid var(--bluffs); border-radius: var(--r); }
+.formula-indice p { margin: 0; }
+.fi-formula { font-weight: 600; color: var(--tinta); }
+.fi-detalle { margin-top: 2px !important; font-size: 12.5px; color: var(--tinta-2); }
+/* Tareas repetitivas: variantes de una tarea similar */
+.rep-var { font-size: 12px; margin-top: 2px; }
