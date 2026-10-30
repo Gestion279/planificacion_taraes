@@ -4,7 +4,7 @@
 // Una tarea repetitiva NO se convierte sola en propuesta: se señala como posible
 // oportunidad y quien la evalúa decide si registrar una propuesta de mejora.
 // Respeta el período compartido y los filtros globales de área y persona.
-// Dos pestañas: «Por persona» (vista original, sin cambios) y «Por acción» (agrupada por la acción
+// Tres pestañas: «Resumen» (tareas similares por persona), «Por persona» y «Por acción» (agrupada por la acción
 // de Carga semanal, con apertura por tarea y la comparación de la misma tarea entre personas).
 // =====================================================================
 import { topRepetitivasPorPersona, repetitivasPorAccion, mismaTareaPorPersona, tareasSimilaresPorPersona, INDICE_DEFECTO, CONFIG } from '../engine.js';
@@ -18,20 +18,20 @@ export const titulo = 'Tareas repetitivas';
 const ANCHO_MIN = 400, SEPARACION = 14;
 let observador = null;
 
-const TABS = [['persona', 'Por persona'], ['accion', 'Por acción']];
+const TABS = [['resumen', 'Resumen'], ['persona', 'Por persona'], ['accion', 'Por acción']];
 
 export async function render(el, app) {
   const volver = () => render(el, app);
   const { rows, n, cont } = await prepararPeriodo(el, app, { titulo, alCambiar: volver });
-  const tab = TABS.some(([k]) => k === app.params.tab) ? app.params.tab : 'persona';
-  if (rows.length) resumenSimilares(cont, rows, app);
-  cont.insertAdjacentHTML('beforebegin', `<nav class="tabs" role="tablist" aria-label="Vista de tareas repetitivas">${TABS.map(([k, l]) => `<a role="tab" href="#/repetitivas${k === 'persona' ? '' : `?tab=${k}`}" aria-selected="${k === tab}">${l}</a>`).join('')}</nav>`);
+  const tab = TABS.some(([k]) => k === app.params.tab) ? app.params.tab : 'resumen';
+  cont.insertAdjacentHTML('beforebegin', `<nav class="tabs" role="tablist" aria-label="Vista de tareas repetitivas">${TABS.map(([k, l]) => `<a role="tab" href="#/repetitivas${k === 'resumen' ? '' : `?tab=${k}`}" aria-selected="${k === tab}">${l}</a>`).join('')}</nav>`);
   if (!rows.length) return;
   if (tab === 'accion') porAccion(cont, { rows, n, app, volver });
-  else repetitivas(cont, { rows, n, app, volver });
+  else if (tab === 'persona') repetitivas(cont, { rows, n, app, volver });
+  else resumenSimilares(cont, rows, app);
 }
 
-// ---------- Cuadro resumen de tareas similares (antes de las pestañas) ----------
+// ---------- Pestaña «Resumen»: tareas similares por persona ----------
 // Por persona: líneas cargadas, tareas similares y su relación. La carga no se modifica:
 // cada operador sigue trabajando con su nivel de detalle; el cuadro muestra cuánto se repite.
 function resumenSimilares(cont, rows, app) {
@@ -39,15 +39,15 @@ function resumenSimilares(cont, rows, app) {
   const cfg = app.configIndice?.length ? app.configIndice : INDICE_DEFECTO;
   const umbral = cfg.find((c) => c.termino === 'S')?.parametros?.tolerancia ?? 20;
   const conAlerta = datos.filter((d) => d.pctSimilares > umbral).length;
-  cont.insertAdjacentHTML('beforebegin', `
+  cont.innerHTML = `
   <section class="panel" aria-labelledby="sim-t">
     <header class="panel-cab"><h2 id="sim-t">Tareas similares por persona</h2></header>
     <p class="nota nota-cab">Tareas similares agrupa, dentro de cada semana, las líneas que son la misma tarea cargada con distinto cliente, CC, mes u obra (por ejemplo, varios «Pedir pago…» a distintos proveedores). La carga no cambia: cada persona sigue trabajando con su nivel de detalle.${conAlerta ? ` ${conAlerta} ${conAlerta === 1 ? 'persona supera' : 'personas superan'} el ${num(umbral, 0)}%.` : ''}</p>
     <div data-sim-tabla></div>
     <p class="nota">% Tareas similares = 1 − tareas similares / líneas cargadas. % horas: parte de las horas que está en tareas con más de una variante en la semana.</p>
-  </section>`);
+  </section>`;
   const chip = (v, al) => `<span class="cal-chip ${al ? 'cal-alerta' : ''}">${porc(v)}</span>`;
-  tabla(cont.previousElementSibling.querySelector('[data-sim-tabla]'), {
+  tabla(cont.querySelector('[data-sim-tabla]'), {
     rows: datos, orden: { key: 'pctSimilares', dir: -1 },
     cols: [
       { key: 'persona', label: 'Persona', render: (d) => `<span class="nom">${esc(d.persona)}</span><span class="tenue bloque">${esc(d.area)}</span>` },
