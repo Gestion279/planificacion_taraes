@@ -166,3 +166,13 @@ Verifican el motor de análisis (indicadores, alertas, auditoría, estados, jorn
 ## Si más adelante se quiere restringir el acceso
 
 Para limitar quién guarda cambios alcanza con definir la clave de carga (arriba). Para restringir también quién **ve**, la base ya tiene preparadas las columnas de usuario (`usuario_id`, `usuario_email`) y las políticas para usuarios autenticados: habría que quitar los permisos de lectura de `anon` y reponer una pantalla de ingreso.
+
+## Tareas similares e Índice de calidad (octubre 2026)
+
+- **Tareas similares:** la base agrupa las líneas que son la misma tarea con distinto cliente, CC, mes u obra
+  (`tarea_grupo_clave`, columnas `grupo_clave` y `grupo_nombre` en `v_actividades`). La carga no cambia.
+  Los nombres de los grupos se editan en la tabla `tareas_similares`.
+- **Índice de calidad de planificación** (Resumen → Calidad de la planificación por persona): los pesos y umbrales
+  están en la tabla `indice_calidad_config` y se cambian desde el Table Editor de Supabase, sin tocar código.
+  `v_indice_calidad_control` avisa si los pesos no suman 100.
+- Migraciones: `supabase/migrations/20261030112541_*`, `20261030113735_*` y `20261030114155_*` (ya aplicadas).
