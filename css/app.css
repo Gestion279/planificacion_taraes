@@ -784,3 +784,45 @@ a.lo-tit { text-decoration: none; } a.lo-tit:hover { text-decoration: underline;
 .fi-detalle { margin-top: 2px !important; font-size: 12.5px; color: var(--tinta-2); }
 /* Tareas repetitivas: variantes de una tarea similar */
 .rep-var { font-size: 12px; margin-top: 2px; }
+
+/* Comparar personas */
+.comp-filtros { margin-bottom: 8px; }
+.comp-filtros .ms { min-width: 220px; }
+.comp-medida { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--tinta-2); font-weight: 500; }
+.comp-medida legend { padding: 0; margin-bottom: 3px; }
+.comp-seg { display: flex; }
+.comp-seg button { min-height: 34px; padding: 0 12px; font: inherit; font-size: 13px; font-weight: 600; color: var(--tinta); background: #fff; border: 1px solid var(--linea-f); margin-left: -1px; cursor: pointer; }
+.comp-seg button:first-child { border-radius: var(--r) 0 0 var(--r); margin-left: 0; }
+.comp-seg button:last-child { border-radius: 0 var(--r) var(--r) 0; }
+.comp-seg button[aria-pressed="true"] { background: var(--pewter-osc); border-color: var(--pewter-osc); color: #fff; position: relative; }
+.comp-atajos { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 16px; }
+.comp-atajos button { all: unset; cursor: pointer; min-height: 28px; font-size: 13px; color: var(--bluffs-txt); text-decoration: underline; text-underline-offset: 2px; }
+.comp-atajos button:hover { color: var(--tinta); }
+.comp-atajos button:focus-visible { outline: 2px solid var(--bluffs); border-radius: 3px; }
+.comp-resumen { display: flex; flex-direction: column; gap: 8px; }
+.comp-rfila { display: grid; grid-template-columns: 180px minmax(0, 1fr) 70px 190px; gap: 12px; align-items: center; }
+.comp-rfila .nom { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.comp-rfila .tenue { font-size: 12.5px; }
+.comp-punto { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.comp-barra { display: block; height: 12px; background: #F0EBE2; border-radius: 3px; overflow: hidden; }
+.comp-barra > span { display: block; height: 100%; }
+.comp-check { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; color: var(--tinta-2); cursor: pointer; }
+.comp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--pewter-osc); }
+.comp-tabla th:not(:first-child) { white-space: nowrap; }
+.comp-tabla td { vertical-align: middle; }
+.comp-tarea { font-weight: 600; }
+.comp-celda { border-left: 2px solid #fff; }
+.comp-tabla tr.comp-abierta td:first-child { background: var(--sun); box-shadow: inset 3px 0 0 var(--bluffs); }
+.comp-det > td { background: #FBF8F3; padding: 0 !important; }
+.comp-detalle { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.comp-dfila { display: grid; grid-template-columns: 180px minmax(0, 1fr) 260px; gap: 12px; font-size: 13px; }
+.comp-dfila .nom { font-weight: 600; }
+.comp-dfila .tenue { text-align: right; }
+@media (max-width: 860px) {
+  .comp-rfila { grid-template-columns: minmax(0, 1fr) 70px; }
+  .comp-rfila .comp-barra { grid-column: 1 / -1; grid-row: 2; }
+  .comp-rfila .tenue { grid-column: 1 / -1; }
+  .comp-dfila { grid-template-columns: 1fr; gap: 2px; }
+  .comp-dfila .tenue { text-align: left; }
+  .comp-filtros .ms, .comp-filtros label { flex: 1 1 100%; }
+}
