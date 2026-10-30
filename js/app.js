@@ -45,6 +45,8 @@ export const app = {
   propuestas: [],
   propuestasDisponibles: true,
   importaciones: [],
+  // Pesos y umbrales del índice de calidad (tabla indice_calidad_config)
+  configIndice: null,
 
   // ¿La fila pasa los filtros globales? (actividades, cambios o registros persona-semana)
   pasa(r) {
@@ -157,8 +159,9 @@ export const app = {
 
   // Datos cargados en la aplicación que valen para todas las semanas
   async cargarContexto() {
-    const [riesgos, excepciones, importaciones] = await Promise.all([db.riesgosEvaluados(), db.excepcionesAuditoria(),
-      db.importaciones(1000).catch(() => []), this.cargarPropuestas()]);
+    const [riesgos, excepciones, importaciones, configIndice] = await Promise.all([db.riesgosEvaluados(), db.excepcionesAuditoria(),
+      db.importaciones(1000).catch(() => []), db.configIndice().catch((e) => { console.error(e); return null; }), this.cargarPropuestas()]);
+    this.configIndice = configIndice;   // null: se usan los pesos por defecto del motor
     CTX.riesgos = new Map(riesgos.map((x) => [`${x.persona_id}|${x.riesgo_norm}`, { prob: x.prob, impacto: x.impacto }]));
     CTX.excepciones = new Set(excepciones.map((x) => `${x.persona_id}|${x.tarea_norm}|${x.regla}`));
     this.importaciones = importaciones;

@@ -119,6 +119,8 @@ export function claveTarea(texto) {
   return [...new Set(toks)].sort().join(' ');
 }
 const claveDe = (r) => claveTarea(r.tarea) || norm(r.tarea);
+// Tareas similares: grupo calculado en la base (misma acción y mismo inicio del texto, sin cliente, CC, mes u obra)
+const claveSimilar = (r) => r.grupoClave || claveDe(r);
 
 // =====================================================================
 // Capacidad y carga diaria (lugar principal: mapa de calor de Planificación)
@@ -428,12 +430,17 @@ export function analisisRepetitivas(rows, nSemanas = 1) {
 export function topRepetitivasPorPersona(rows, nSemanas = 1, top = 5) {
   const semanas = Math.max(1, nSemanas);
   return [...groupBy(rows.filter((r) => r.tarea), (r) => r.persona)].map(([persona, rs]) => {
-    const tareas = [...groupBy(rs, claveDe)].filter(([clave, ts]) => clave && ts.length >= 2).map(([clave, ts]) => {
-      const tarea = [...groupBy(ts, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    // Se agrupa por tareas similares (grupo de la base); sin grupo, por la clave de tarea de siempre
+    const tareas = [...groupBy(rs, claveSimilar)].filter(([clave, ts]) => clave && ts.length >= 2).map(([clave, ts]) => {
+      const porTexto = [...groupBy(ts, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length);
+      const masUsada = porTexto[0][0];
+      const variantes = porTexto.length;
+      const tarea = variantes > 1 && ts[0].grupoNombre ? ts[0].grupoNombre : masUsada;
       const horas = sum(ts, (r) => r.horas);
-      const tipo = tipoSugerido(tarea, clasificar(tarea, true), 1);
+      const tipo = tipoSugerido(masUsada, clasificar(masUsada, true), 1);
       const horasMes = horas > 0 ? (horas / semanas) * CONFIG.semanasPorMes : null;
-      return { clave, tarea, veces: ts.length, horas, sinHoras: ts.filter((r) => !r.horas).length, semanas: new Set(ts.map((r) => r.semana)).size,
+      return { clave, tarea, variantes, ejemplos: porTexto.slice(0, 5).map(([t]) => t),
+        veces: ts.length, horas, sinHoras: ts.filter((r) => !r.horas).length, semanas: new Set(ts.map((r) => r.semana)).size,
         vecesSemana: ts.length / semanas, horasMes, tipoSugerido: tipo, oportunidad: !!tipo && horasMes >= CONFIG.oportunidadHorasMes,
         personas: [persona], areas: areasDe(ts) };
     }).sort((a, b) => b.veces - a.veces || b.horas - a.horas);
@@ -1024,7 +1031,83 @@ export function mismaTareaPorPersona(rows, minSemanas = 2) {
 }
 
 // Calidad de la planificación por persona en un período
-export function calidadPlanificacion(rows, nSemanas) {
+// ---------- Tareas similares por persona ----------
+// En cada semana se comparan las líneas distintas que cargó la persona con los grupos de tareas similares.
+// % Tareas similares = 1 − tareas similares / líneas: de cada 100 líneas, cuántas son variantes de otra
+// tarea de la misma semana (misma tarea con distinto cliente, CC, mes u obra). La carga no se modifica.
+export function tareasSimilaresPorPersona(rows) {
+  const res = new Map();
+  for (const [persona, rs] of groupBy(rows.filter((r) => r.tarea), (r) => r.persona)) {
+    let lineas = 0, grupos = 0, horas = 0, horasSim = 0;
+    for (const [, sem] of groupBy(rs, (r) => r.semana)) {
+      for (const [, gs] of groupBy(sem, claveSimilar)) {
+        const nv = new Set(gs.map((r) => r.tareaNorm || norm(r.tarea))).size;
+        const h = sum(gs, (r) => r.horas);
+        lineas += nv; grupos += 1; horas += h;
+        if (nv > 1) horasSim += h;
+      }
+    }
+    res.set(persona, {
+      persona, area: areasDe(rs).join(', '), lineas, tareasSimilares: grupos, lineasSimilares: lineas - grupos,
+      pctSimilares: lineas ? (1 - grupos / lineas) * 100 : null, horas, pctHorasSimilares: horas ? (horasSim / horas) * 100 : null,
+    });
+  }
+  return res;
+}
+
+// ---------- Índice de calidad de planificación ----------
+// Pesos y umbrales: tabla indice_calidad_config de la base (editable). Estos valores se usan solo si no está.
+export const INDICE_DEFECTO = [
+  { termino: 'P', nombre: 'Planificación', peso: 20, parametros: {} },
+  { termino: 'O', nombre: 'Ocupación', peso: 20, parametros: { optimo_desde: 80, optimo_hasta: 95, limite: 120 } },
+  { termino: 'A', nombre: 'Prioridad', peso: 15, parametros: { tolerancia: 30, limite: 100 } },
+  { termino: 'H', nombre: 'Estimación', peso: 10, parametros: { factor: 2 } },
+  { termino: 'E', nombre: 'Evaluación', peso: 15, parametros: { meta: 50 } },
+  { termino: 'S', nombre: 'Tareas similares', peso: 20, parametros: { tolerancia: 20, limite: 70 } },
+];
+const acotar = (v) => Math.min(1, Math.max(0, v));
+const conTolerancia = (v, p) => (v <= p.tolerancia ? 1 : acotar(1 - (v - p.tolerancia) / ((p.limite - p.tolerancia) || 1)));
+// Puntaje de 0 a 1 de cada componente (valores en %, salvo semanas)
+const COMPONENTES = {
+  P: (d) => (d.totalSemanas ? acotar(d.semanas / d.totalSemanas) : 0),
+  O: (d, p) => { const v = d.ocupacion ?? 0; return v < p.optimo_desde ? acotar(v / p.optimo_desde) : v <= p.optimo_hasta ? 1 : acotar(1 - (v - p.optimo_hasta) / ((p.limite - p.optimo_hasta) || 1)); },
+  A: (d, p) => conTolerancia(d.pctAlta ?? 0, p),
+  H: (d, p) => acotar(1 - (p.factor * (d.pctSinHoras ?? 0)) / 100),
+  E: (d, p) => acotar((d.pctEvaluadas ?? 0) / (p.meta || 1)),
+  S: (d, p) => conTolerancia(d.pctSimilares ?? 0, p),
+};
+export function indiceCalidad(d, config = INDICE_DEFECTO) {
+  const cfg = config?.length ? config : INDICE_DEFECTO;
+  const partes = {};
+  let total = 0, pesos = 0;
+  for (const c of cfg) {
+    const f = COMPONENTES[c.termino];
+    if (!f) continue;
+    const v = f(d, c.parametros || {});
+    partes[c.termino] = v; total += v * c.peso; pesos += c.peso;
+  }
+  return { indice: pesos ? (total / pesos) * 100 : null, partes };
+}
+// Texto de la fórmula, armado con los pesos y umbrales vigentes
+export function formulaIndice(config = INDICE_DEFECTO) {
+  const cfg = config?.length ? config : INDICE_DEFECTO;
+  const n1 = (v) => Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+  const reglas = {
+    P: () => 'semanas planificadas / semanas del período',
+    O: (p) => `1 con ocupación entre ${n1(p.optimo_desde)}% y ${n1(p.optimo_hasta)}%; por debajo, proporcional; por encima, baja hasta 0 en ${n1(p.limite)}%`,
+    A: (p) => `1 con hasta ${n1(p.tolerancia)}% de tareas en Alta; baja hasta 0 en ${n1(p.limite)}%`,
+    H: (p) => `1 − ${n1(p.factor)} × % de tareas sin horas`,
+    E: (p) => `% de tareas evaluadas / ${n1(p.meta)}% (máximo 1)`,
+    S: (p) => `1 con hasta ${n1(p.tolerancia)}% de tareas similares; baja hasta 0 en ${n1(p.limite)}%`,
+  };
+  return {
+    formula: `Índice de calidad (0 a 100) = ${cfg.map((c) => `${n1(c.peso)}% ${c.nombre}`).join(' + ')}.`,
+    detalle: `Cada componente vale de 0 a 1. ${cfg.filter((c) => reglas[c.termino]).map((c) => `${c.nombre}: ${reglas[c.termino](c.parametros || {})}`).join(' · ')}.`,
+  };
+}
+
+export function calidadPlanificacion(rows, nSemanas, config = INDICE_DEFECTO) {
+  const similares = tareasSimilaresPorPersona(rows);
   return [...groupBy(rows, (r) => r.persona)].map(([persona, rs]) => {
     const semanas = new Set(rs.map((r) => r.semana)).size;
     const jornada = Math.max(...rs.map((r) => r.jornada || 0)) || CONFIG.jornada;
@@ -1036,6 +1119,7 @@ export function calidadPlanificacion(rows, nSemanas) {
       pctAlta: n ? (rs.filter((r) => prioridadDe(r) === 'Alta').length / n) * 100 : null,
       pctSinHoras: n ? (rs.filter((r) => !r.horas).length / n) * 100 : null,
       pctEvaluadas: n ? (rs.filter((r) => estadoDe(r) !== 'Sin estado').length / n) * 100 : null,
+      pctSimilares: similares.get(persona)?.pctSimilares ?? null,
     };
-  }).sort((a, b) => (b.ocupacion ?? -1) - (a.ocupacion ?? -1) || a.persona.localeCompare(b.persona, 'es'));
+  }).map((d) => ({ ...d, indice: indiceCalidad(d, config).indice })).sort((a, b) => (b.ocupacion ?? -1) - (a.ocupacion ?? -1) || a.persona.localeCompare(b.persona, 'es'));
 }

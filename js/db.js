@@ -57,6 +57,8 @@ const mapActividad = (r) => ({
   jornada: n(r.jornada),
   accion: r.accion || null, accionAuto: !!r.accion_auto, detalle: r.detalle || null,
   cumplimiento: r.cumplimiento || null, noPlanificada: !!r.no_planificada, origen: r.origen || 'excel',
+  // Tareas similares: la misma tarea cargada con distinto cliente, CC, mes u obra (agrupación de la base)
+  grupoClave: r.grupo_clave || null, grupoNombre: r.grupo_nombre || null,
 });
 const mapCambio = (c) => ({
   id: c.id, fechaHora: c.created_at, tipo: c.tipo, campo: c.campo, antes: c.valor_anterior, despues: c.valor_nuevo,
@@ -79,7 +81,7 @@ async function todo(consulta) {
 }
 
 // Para semanas que no son la seleccionada alcanza con las columnas de análisis (menos datos por la red)
-const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada,horas_reales,accion,cumplimiento,no_planificada,origen';
+const COLS_ANALISIS = 'id,semana_id,semana_inicio,persona_id,persona,area_id,area,fecha,dia,tarea,tarea_norm,ordinal,prioridad,horas_planificadas,riesgos,estado,alta_posterior,jornada,horas_reales,accion,cumplimiento,no_planificada,origen,grupo_clave,grupo_nombre';
 
 // Una fila por persona y semana con planificación (cuadro de cumplimiento de carga)
 export async function personaSemana() {
@@ -116,6 +118,14 @@ export async function riesgosEvaluados() {
   const { data, error } = await sb.from('riesgos_evaluados').select('persona_id,riesgo_norm,prob,impacto');
   if (error) throw new Error(error.message);
   return data;
+}
+
+// Pesos y umbrales del índice de calidad de planificación (tabla indice_calidad_config).
+// null si la base todavía no tiene la tabla: la aplicación usa los valores por defecto del motor.
+export async function configIndice() {
+  const { data, error } = await sb.from('indice_calidad_config').select('termino,nombre,dato,peso,parametros,orden').order('orden');
+  if (error) { if (/does not exist|PGRST205|schema cache/i.test(`${error.code || ''} ${error.message || ''}`)) return null; throw new Error(error.message); }
+  return data.map((c) => ({ ...c, peso: Number(c.peso), parametros: c.parametros || {} }));
 }
 
 export async function excepcionesAuditoria() {
