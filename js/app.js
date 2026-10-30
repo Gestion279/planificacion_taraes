@@ -12,9 +12,10 @@ import * as evolucion from './modules/evolucion.js';
 import * as mejoras from './modules/mejoras.js';
 import * as repetitivas from './modules/repetitivas.js';
 import * as acciones from './modules/acciones.js';
+import * as comparar from './modules/comparar.js';
 import * as carga from './modules/carga.js';
 
-const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, repetitivas, acciones, carga };
+const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, repetitivas, comparar, acciones, carga };
 // Ruta anterior: Personas se integró en Planificación (detalle del mapa de calor) y en Carga (jornada y horas reales).
 // Los enlaces guardados siguen funcionando.
 const RUTAS_ANTERIORES = { personas: 'planificacion' };

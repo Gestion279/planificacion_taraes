@@ -1030,6 +1030,60 @@ export function mismaTareaPorPersona(rows, minSemanas = 2) {
   return out.sort((a, b) => b.horas - a.horas);
 }
 
+// ---------- Comparar personas ----------
+// Compara a las personas elegidas dentro de una acción.
+// resumen: horas de cada persona en la acción por semana planificada y su peso en lo que planificó.
+// grupos: una fila por tarea. Primero manda el grupo de tareas similares de la base (grupoClave);
+// el resto se junta por texto parecido entre personas (≥ 2 palabras y ≥ 60% en común, el mismo
+// criterio de mismaTareaPorPersona). h por semana = horas de la persona en la tarea / semanas en que la hizo.
+export function comparacionPersonas(rows, { personas = [], accion = null } = {}) {
+  const deAccion = (r) => (r.accion || SIN_ACCION) === accion;
+  const resumen = personas.map((persona) => {
+    const propias = rows.filter((r) => r.persona === persona);
+    const semanas = new Set(propias.map((r) => r.semana)).size;
+    const enAccion = propias.filter(deAccion);
+    const horas = sum(enAccion, (r) => r.horas), total = sum(propias, (r) => r.horas);
+    return { persona, semanas, horas, lineas: enAccion.length, horasSemana: semanas ? horas / semanas : null, pctHoras: total ? (horas / total) * 100 : null };
+  });
+
+  const elegidas = new Set(personas);
+  const filas = rows.filter((r) => r.tarea && elegidas.has(r.persona) && deAccion(r));
+  const unicas = [...groupBy(filas, (r) => (r.grupoClave ? `G:${r.grupoClave}` : claveDe(r)))]
+    .filter(([clave]) => clave).map(([clave, rs]) => ({ clave, rs, base: clave.startsWith('G:') }));
+  const padre = unicas.map((_, i) => i);
+  const raiz = (x) => { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; };
+  const toks = unicas.map((t) => (t.base ? new Set() : new Set(t.clave.split(' ').filter(Boolean))));
+  for (let i = 0; i < unicas.length; i++) {
+    if (!toks[i].size) continue;
+    for (let j = i + 1; j < unicas.length; j++) {
+      if (!toks[j].size) continue;
+      let inter = 0; for (const w of toks[i]) if (toks[j].has(w)) inter++;
+      if (inter >= 2 && inter / Math.max(toks[i].size, toks[j].size) >= 0.6) { const a = raiz(i), b = raiz(j); if (a !== b) padre[a] = b; }
+    }
+  }
+  const juntas = new Map();
+  unicas.forEach((t, i) => { const r = raiz(i); if (!juntas.has(r)) juntas.set(r, { claves: [], rs: [] }); juntas.get(r).claves.push(t.clave); juntas.get(r).rs.push(...t.rs); });
+
+  const grupos = [...juntas.values()].map(({ claves, rs }) => {
+    const porPersona = new Map([...groupBy(rs, (r) => r.persona)].map(([persona, ts]) => {
+      const semanas = new Set(ts.map((r) => r.semana)).size;
+      const horas = sum(ts, (r) => r.horas);
+      const textos = [...groupBy(ts, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length).map(([t]) => t);
+      return [persona, { persona, semanas, horas, veces: ts.length, horasSemana: semanas && horas ? horas / semanas : null, textos }];
+    }));
+    const tarea = rs.find((r) => r.grupoNombre)?.grupoNombre
+      || [...groupBy(rs, (r) => r.tarea)].sort((a, b) => b[1].length - a[1].length)[0][0];
+    const conHoras = [...porPersona.values()].map((p) => p.horasSemana).filter((v) => v > 0);
+    const textos = new Set(rs.map((r) => r.tareaNorm || norm(r.tarea))).size;
+    return {
+      clave: claves.sort().join('|'), tarea, porPersona, personas: porPersona.size, horas: sum(rs, (r) => r.horas),
+      variantes: textos, similar: textos > 1 || claves.length > 1,
+      relacion: conHoras.length > 1 ? Math.max(...conHoras) / Math.min(...conHoras) : null,
+    };
+  }).sort((a, b) => b.personas - a.personas || b.horas - a.horas || a.tarea.localeCompare(b.tarea, 'es'));
+  return { resumen, grupos };
+}
+
 // Calidad de la planificación por persona en un período
 // ---------- Tareas similares por persona ----------
 // En cada semana se comparan las líneas distintas que cargó la persona con los grupos de tareas similares.
