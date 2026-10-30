@@ -7,8 +7,8 @@
 // Dos pestañas: «Por persona» (vista original, sin cambios) y «Por acción» (agrupada por la acción
 // de Carga semanal, con apertura por tarea y la comparación de la misma tarea entre personas).
 // =====================================================================
-import { topRepetitivasPorPersona, repetitivasPorAccion, mismaTareaPorPersona, CONFIG } from '../engine.js';
-import { esc, num, horas, porc, opciones } from '../ui.js';
+import { topRepetitivasPorPersona, repetitivasPorAccion, mismaTareaPorPersona, tareasSimilaresPorPersona, INDICE_DEFECTO, CONFIG } from '../engine.js';
+import { esc, num, horas, porc, opciones, tabla } from '../ui.js';
 import { prepararPeriodo } from './periodo.js';
 import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
 
@@ -24,10 +24,39 @@ export async function render(el, app) {
   const volver = () => render(el, app);
   const { rows, n, cont } = await prepararPeriodo(el, app, { titulo, alCambiar: volver });
   const tab = TABS.some(([k]) => k === app.params.tab) ? app.params.tab : 'persona';
+  if (rows.length) resumenSimilares(cont, rows, app);
   cont.insertAdjacentHTML('beforebegin', `<nav class="tabs" role="tablist" aria-label="Vista de tareas repetitivas">${TABS.map(([k, l]) => `<a role="tab" href="#/repetitivas${k === 'persona' ? '' : `?tab=${k}`}" aria-selected="${k === tab}">${l}</a>`).join('')}</nav>`);
   if (!rows.length) return;
   if (tab === 'accion') porAccion(cont, { rows, n, app, volver });
   else repetitivas(cont, { rows, n, app, volver });
+}
+
+// ---------- Cuadro resumen de tareas similares (antes de las pestañas) ----------
+// Por persona: líneas cargadas, tareas similares y su relación. La carga no se modifica:
+// cada operador sigue trabajando con su nivel de detalle; el cuadro muestra cuánto se repite.
+function resumenSimilares(cont, rows, app) {
+  const datos = [...tareasSimilaresPorPersona(rows).values()].filter((d) => d.lineas);
+  const cfg = app.configIndice?.length ? app.configIndice : INDICE_DEFECTO;
+  const umbral = cfg.find((c) => c.termino === 'S')?.parametros?.tolerancia ?? 20;
+  const conAlerta = datos.filter((d) => d.pctSimilares > umbral).length;
+  cont.insertAdjacentHTML('beforebegin', `
+  <section class="panel" aria-labelledby="sim-t">
+    <header class="panel-cab"><h2 id="sim-t">Tareas similares por persona</h2></header>
+    <p class="nota nota-cab">Tareas similares agrupa, dentro de cada semana, las líneas que son la misma tarea cargada con distinto cliente, CC, mes u obra (por ejemplo, varios «Pedir pago…» a distintos proveedores). La carga no cambia: cada persona sigue trabajando con su nivel de detalle.${conAlerta ? ` ${conAlerta} ${conAlerta === 1 ? 'persona supera' : 'personas superan'} el ${num(umbral, 0)}%.` : ''}</p>
+    <div data-sim-tabla></div>
+    <p class="nota">% Tareas similares = 1 − tareas similares / líneas cargadas. % horas: parte de las horas que está en tareas con más de una variante en la semana.</p>
+  </section>`);
+  const chip = (v, al) => `<span class="cal-chip ${al ? 'cal-alerta' : ''}">${porc(v)}</span>`;
+  tabla(cont.previousElementSibling.querySelector('[data-sim-tabla]'), {
+    rows: datos, orden: { key: 'pctSimilares', dir: -1 },
+    cols: [
+      { key: 'persona', label: 'Persona', render: (d) => `<span class="nom">${esc(d.persona)}</span><span class="tenue bloque">${esc(d.area)}</span>` },
+      { key: 'lineas', label: 'Líneas cargadas', alinear: 'num', render: (d) => num(d.lineas, 0) },
+      { key: 'tareasSimilares', label: 'Tareas similares', alinear: 'num', render: (d) => num(d.tareasSimilares, 0) },
+      { key: 'pctSimilares', label: '% Tareas similares', alinear: 'num', render: (d) => chip(d.pctSimilares, d.pctSimilares > umbral) },
+      { key: 'pctHorasSimilares', label: '% horas', alinear: 'num', render: (d) => porc(d.pctHorasSimilares) },
+    ],
+  });
 }
 
 function repetitivas(cont, { rows, n, app, volver }) {
@@ -37,7 +66,7 @@ function repetitivas(cont, { rows, n, app, volver }) {
   const propuestaDe = (clave) => app.propuestas.find((p) => p.tarea_clave === clave && p.estado !== 'Descartada');
 
   cont.innerHTML = `
-  <p class="intro">Las cinco tareas que cada persona más repite en el período, ordenadas por cantidad de veces y, ante empate, por horas acumuladas. Las marcadas como <b>posible oportunidad</b> son de tipo manual, administrativo o de control y suman al menos ${CONFIG.oportunidadHorasMes} h por mes: vale la pena analizar si pueden eliminarse, simplificarse, automatizarse o estandarizarse.</p>
+  <p class="intro">Las cinco tareas que cada persona más repite en el período, ordenadas por cantidad de veces y, ante empate, por horas acumuladas. Las tareas similares (la misma tarea con distinto cliente, CC, mes u obra) se cuentan juntas. Las marcadas como <b>posible oportunidad</b> son de tipo manual, administrativo o de control y suman al menos ${CONFIG.oportunidadHorasMes} h por mes: vale la pena analizar si pueden eliminarse, simplificarse, automatizarse o estandarizarse.</p>
   ${!con.length ? '<p class="vacio panel">No se detectaron tareas repetidas en el período.</p>' : `<div class="grid-rep">${con.map((p, i) => `
     <section class="panel rep-card" aria-labelledby="rep-${i}">
       <header class="rep-cab"><h2 id="rep-${i}">${esc(p.persona)}</h2><span class="tenue">${esc(p.area)}</span></header>
@@ -45,7 +74,7 @@ function repetitivas(cont, { rows, n, app, volver }) {
       <table class="tabla compacta rep-tabla">
         <thead><tr><th>Tarea</th><th class="num">Veces repetida</th><th class="num">Horas acumuladas</th></tr></thead>
         <tbody>${p.tareas.map((t) => { const pr = propuestaDe(t.clave); return `<tr>
-          <td>${esc(t.tarea)}${t.oportunidad || pr ? `<span class="rep-opor">${pr ? `<a href="#/mejoras?propuesta=${pr.id}">Propuesta: ${esc(pr.estado)}</a>`
+          <td>${esc(t.tarea)}${t.variantes > 1 ? `<span class="tenue bloque rep-var" title="${esc(t.ejemplos.join(' · '))}">${t.variantes} variantes: ${esc(t.ejemplos.slice(0, 2).join(' · '))}${t.variantes > 2 ? '…' : ''}</span>` : ''}${t.oportunidad || pr ? `<span class="rep-opor">${pr ? `<a href="#/mejoras?propuesta=${pr.id}">Propuesta: ${esc(pr.estado)}</a>`
             : `Posible oportunidad: ${esc(t.tipoSugerido.toLowerCase())}${app.propuestasDisponibles ? ` <button type="button" class="rep-eval" data-evaluar="${i}|${esc(t.clave)}">Evaluar</button>` : ''}`}</span>` : ''}</td>
           <td class="num"><b>${t.veces}</b></td>
           <td class="num">${t.horas ? horas(t.horas) : '<span class="tenue">—</span>'}${t.sinHoras && t.horas ? `<span class="tenue bloque" title="Veces sin tiempo cargado">${t.sinHoras} sin tiempo</span>` : ''}</td></tr>`; }).join('')}</tbody>

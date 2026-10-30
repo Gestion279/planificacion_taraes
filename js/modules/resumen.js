@@ -6,7 +6,7 @@
 //   D. Principales oportunidades de mejora (síntesis; el detalle está en Propuestas de mejora)
 //   E. Calidad de la planificación por persona (acumulado de un período, con alertas)
 // =====================================================================
-import { kpisSemana, cumplimientoCarga, analisisRepetitivas, calidadPlanificacion, GRUPOS, grupoPropuesta, ordenPropuesta, ESTADOS_ACTIVOS, CONFIG } from '../engine.js';
+import { kpisSemana, cumplimientoCarga, analisisRepetitivas, calidadPlanificacion, formulaIndice, INDICE_DEFECTO, GRUPOS, grupoPropuesta, ordenPropuesta, ESTADOS_ACTIVOS, CONFIG } from '../engine.js';
 import { esc, num, horas, porc, signo, rangoSemana, fechaCorta, situacionHTML, grupoBadge, tabla, opciones } from '../ui.js';
 import { situacionesSemana } from '../situaciones.js';
 import { abrirPropuesta, borradorDeTarea } from '../propuesta.js';
@@ -76,6 +76,7 @@ export async function render(el, app) {
   <section class="panel" aria-labelledby="calidad-t">
     <header class="panel-cab"><h2 id="calidad-t">Calidad de la planificación por persona</h2>
       <form class="filtros filtros-cab" data-calidad-periodo><label>Período<select name="periodo">${opciones(PERIODOS_CALIDAD, CAL.periodo)}</select></label></form></header>
+    ${formulaHTML(app)}
     <div data-calidad><p class="tenue">Cargando…</p></div>
   </section>`;
 
@@ -92,6 +93,17 @@ export async function render(el, app) {
 const PERIODOS_CALIDAD = [['8', 'Últimas 8 semanas'], ['m3', 'Últimos 3 meses'], ['todo', 'Desde el inicio']];
 const CAL = { periodo: '8' };
 const UMBRAL_ALTA = CONFIG.altaShareMax * 100, UMBRAL_SIN_HORAS = 20, UMBRAL_OCUPACION = 60;
+const configIndice = (app) => (app.configIndice?.length ? app.configIndice : INDICE_DEFECTO);
+// Tolerancia de tareas similares: la misma que usa el índice (tabla indice_calidad_config)
+const umbralSimilares = (app) => configIndice(app).find((c) => c.termino === 'S')?.parametros?.tolerancia ?? 20;
+// Semáforo del índice, con los mismos cortes que el cuadro de planificación cargada
+const nivelIndice = (v) => (v === null || v === undefined ? '' : v >= 75 ? 'verde' : v >= 50 ? 'amarillo' : v >= 25 ? 'naranja' : 'rojo');
+
+// Fórmula del índice debajo del título: se arma con los pesos y umbrales vigentes en la base
+function formulaHTML(app) {
+  const { formula, detalle } = formulaIndice(configIndice(app));
+  return `<div class="formula-indice"><p class="fi-formula">${esc(formula)}</p><p class="fi-detalle">${esc(detalle)}</p></div>`;
+}
 
 async function calidad(cont, app) {
   const semanas = CAL.periodo === 'todo' ? app.semanasDePeriodo({ tipo: 'n', n: app.semanas.length })
@@ -99,14 +111,15 @@ async function calidad(cont, app) {
   let rows;
   try { ({ rows } = await app.filasDe(semanas)); } catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   const n = semanas.length;
-  const datos = calidadPlanificacion(rows, n);
+  const datos = calidadPlanificacion(rows, n, configIndice(app));
+  const UMBRAL_SIM = umbralSimilares(app);
   if (!datos.length) { cont.innerHTML = '<p class="vacio">Sin datos para el período.</p>'; return; }
   const alerta = (v, umbral, mayor = true) => v !== null && (mayor ? v > umbral : v < umbral);
   const chip = (txt, al) => `<span class="cal-chip ${al ? 'cal-alerta' : ''}">${txt}</span>`;
   const barra = (pctV, al) => `<span class="cal-barra" aria-hidden="true"><span class="${al ? 'cal-baja' : ''}" style="width:${Math.min(100, Math.max(0, pctV || 0)).toFixed(0)}%"></span></span>`;
   const conAlta = datos.filter((d) => alerta(d.pctAlta, UMBRAL_ALTA)).length;
   cont.innerHTML = `<p class="nota nota-cab">${n} ${n === 1 ? 'semana' : 'semanas'} hasta la semana seleccionada. ${conAlta ? `${conAlta} ${conAlta === 1 ? 'persona marca' : 'personas marcan'} más del ${num(UMBRAL_ALTA, 0)}% de sus tareas como Alta: así la importancia deja de servir para priorizar.` : ''}</p><div data-cal-tabla></div>
-    <p class="nota">Ocupación acumulada: horas planificadas del período sobre la jornada de las semanas planificadas. Se marca para revisar: ocupación menor al ${UMBRAL_OCUPACION}% (planificación incompleta), más del ${num(UMBRAL_ALTA, 0)}% de tareas en Alta o más del ${UMBRAL_SIN_HORAS}% sin horas. Evaluadas: con Estado o cumplimiento cargado.</p>`;
+    <p class="nota">Ocupación acumulada: horas planificadas del período sobre la jornada de las semanas planificadas. Se marca para revisar: ocupación menor al ${UMBRAL_OCUPACION}% (planificación incompleta), más del ${num(UMBRAL_ALTA, 0)}% de tareas en Alta o más del ${UMBRAL_SIN_HORAS}% sin horas. Evaluadas: con Estado o cumplimiento cargado. % Tareas similares: de cada 100 líneas, cuántas son la misma tarea de esa semana cargada con distinto cliente, CC, mes u obra (se marca a partir del ${num(UMBRAL_SIM, 0)}%; el detalle está en Tareas repetitivas).</p>`;
   tabla(cont.querySelector('[data-cal-tabla]'), {
     rows: datos, orden: { key: 'ocupacion', dir: -1 },
     cols: [
@@ -116,6 +129,8 @@ async function calidad(cont, app) {
       { key: 'pctAlta', label: 'Tareas en Alta', alinear: 'num', render: (d) => chip(porc(d.pctAlta), alerta(d.pctAlta, UMBRAL_ALTA)) },
       { key: 'pctSinHoras', label: 'Sin horas', alinear: 'num', render: (d) => chip(porc(d.pctSinHoras), alerta(d.pctSinHoras, UMBRAL_SIN_HORAS)) },
       { key: 'pctEvaluadas', label: 'Evaluadas', alinear: 'num', render: (d) => chip(porc(d.pctEvaluadas), false) },
+      { key: 'pctSimilares', label: '% Tareas similares', alinear: 'num', render: (d) => (d.pctSimilares === null ? '<span class="tenue">—</span>' : chip(porc(d.pctSimilares), alerta(d.pctSimilares, UMBRAL_SIM))) },
+      { key: 'indice', label: 'Índice de calidad', alinear: 'num', render: (d) => (d.indice === null ? '<span class="tenue">—</span>' : `<span class="sem-pill s-${nivelIndice(d.indice)}">${num(d.indice, 0)}</span>`) },
     ],
   });
 }
