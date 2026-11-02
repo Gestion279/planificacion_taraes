@@ -44,15 +44,17 @@ function resumenSimilares(cont, rows, app) {
     <header class="panel-cab"><h2 id="sim-t">Tareas similares por persona</h2></header>
     <p class="nota nota-cab">Tareas similares agrupa, dentro de cada semana, las líneas que son la misma tarea cargada con distinto cliente, CC, mes u obra (por ejemplo, varios «Pedir pago…» a distintos proveedores). La carga no cambia: cada persona sigue trabajando con su nivel de detalle.${conAlerta ? ` ${conAlerta} ${conAlerta === 1 ? 'persona supera' : 'personas superan'} el ${num(umbral, 0)}%.` : ''}</p>
     <div data-sim-tabla></div>
-    <p class="nota">% Tareas similares = 1 − tareas similares / líneas cargadas. % horas: parte de las horas que está en tareas con más de una variante en la semana.</p>
+    <p class="nota">Total tareas: todas las filas cargadas, con las repeticiones diarias (solo de referencia). Líneas cargadas: tareas con texto distinto en cada semana. Tareas agrupadas: las tareas reales, una vez juntadas las variantes. Líneas repetidas = líneas cargadas − tareas agrupadas. % Tareas similares = líneas repetidas / líneas cargadas. % horas: parte de las horas que está en tareas con más de una variante en la semana.</p>
   </section>`;
   const chip = (v, al) => `<span class="cal-chip ${al ? 'cal-alerta' : ''}">${porc(v)}</span>`;
   tabla(cont.querySelector('[data-sim-tabla]'), {
     rows: datos, orden: { key: 'pctSimilares', dir: -1 },
     cols: [
       { key: 'persona', label: 'Persona', render: (d) => `<span class="nom">${esc(d.persona)}</span><span class="tenue bloque">${esc(d.area)}</span>` },
+      { key: 'totalTareas', label: 'Total tareas', alinear: 'num', render: (d) => `<span class="tenue">${num(d.totalTareas, 0)}</span>` },
       { key: 'lineas', label: 'Líneas cargadas', alinear: 'num', render: (d) => num(d.lineas, 0) },
-      { key: 'tareasSimilares', label: 'Tareas similares', alinear: 'num', render: (d) => num(d.tareasSimilares, 0) },
+      { key: 'tareasSimilares', label: 'Tareas agrupadas', alinear: 'num', render: (d) => num(d.tareasSimilares, 0) },
+      { key: 'lineasSimilares', label: 'Líneas repetidas', alinear: 'num', render: (d) => num(d.lineasSimilares, 0) },
       { key: 'pctSimilares', label: '% Tareas similares', alinear: 'num', render: (d) => chip(d.pctSimilares, d.pctSimilares > umbral) },
       { key: 'pctHorasSimilares', label: '% horas', alinear: 'num', render: (d) => porc(d.pctHorasSimilares) },
     ],
