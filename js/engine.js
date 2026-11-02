@@ -1102,7 +1102,8 @@ export function tareasSimilaresPorPersona(rows) {
       }
     }
     res.set(persona, {
-      persona, area: areasDe(rs).join(', '), lineas, tareasSimilares: grupos, lineasSimilares: lineas - grupos,
+      // totalTareas: todas las filas cargadas (con las repeticiones diarias); solo de referencia
+      persona, area: areasDe(rs).join(', '), totalTareas: rs.length, lineas, tareasSimilares: grupos, lineasSimilares: lineas - grupos,
       pctSimilares: lineas ? (1 - grupos / lineas) * 100 : null, horas, pctHorasSimilares: horas ? (horasSim / horas) * 100 : null,
     });
   }
