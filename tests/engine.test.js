@@ -236,3 +236,36 @@ test('repetitivas por acción y misma tarea entre personas', () => {
   assert.equal(m.length, 1);
   assert.deepEqual(m[0].personas.map((p) => p.persona), ['Eliana', 'Luis']);
 });
+
+test('cumplimiento de carga: se mide desde la fecha de alta de cada persona', async () => {
+  const { cumplimientoCarga, calidadPlanificacion, inicioPersona } = await import('../js/engine.js');
+  const semanas = ['2026-10-19', '2026-10-26', '2026-11-02', '2026-11-09'];
+  const reg = [
+    ...semanas.slice(0, 2).map((s) => ({ semana: s, personaId: 'p1', persona: 'Ana', area: 'Gestión' })),
+    { semana: '2026-11-09', personaId: 'p2', persona: 'Melisa', area: 'Gestión' },
+    ...['2026-10-26', '2026-11-02'].map((s) => ({ semana: s, personaId: 'p3', persona: 'Beto', area: 'Gestión' })),
+  ];
+  // sin fechas de alta: como antes, todas desde la semana 1
+  const antes = cumplimientoCarga(reg, semanas);
+  assert.equal(antes.personas.find((p) => p.persona === 'Melisa').pct, 25);
+
+  // Melisa: alta el martes 3/11 → cuenta desde el lunes 9/11 (1 de 1). Beto: alta 28/10 → semana del 26/10.
+  const altas = new Map([['p2', '2026-11-09'], ['p3', '2026-10-28']]);
+  const r = cumplimientoCarga(reg, semanas, altas);
+  const mel = r.personas.find((p) => p.persona === 'Melisa');
+  assert.deepEqual(mel.marcas, [null, null, null, true]);
+  assert.equal(mel.total, 1); assert.equal(mel.pct, 100); assert.equal(mel.nivel, 'verde');
+  const beto = r.personas.find((p) => p.persona === 'Beto');
+  assert.equal(beto.total, 3); assert.equal(beto.conPlan, 2);
+  assert.equal(r.personas.find((p) => p.persona === 'Ana').total, 4);   // sin alta: desde la semana 1
+
+  // si planificó antes del alta, se cuenta desde esa primera planificación
+  assert.equal(inicioPersona(semanas, '2026-11-09', 1), 1);
+  assert.equal(inicioPersona(semanas, null, 3), 0);
+
+  // índice de calidad: "semanas planificadas" también desde el alta
+  const filas = [fila({ semana: '2026-11-09', personaId: 'p2', persona: 'Melisa' })];
+  assert.equal(calidadPlanificacion(filas, semanas, undefined, altas)[0].totalSemanas, 1);
+  assert.equal(calidadPlanificacion(filas, semanas)[0].totalSemanas, 4);
+  assert.equal(calidadPlanificacion(filas, 4)[0].totalSemanas, 4);       // llamada anterior, con la cantidad
+});
