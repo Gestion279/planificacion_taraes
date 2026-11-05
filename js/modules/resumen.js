@@ -111,7 +111,7 @@ async function calidad(cont, app) {
   let rows;
   try { ({ rows } = await app.filasDe(semanas)); } catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   const n = semanas.length;
-  const datos = calidadPlanificacion(rows, n, configIndice(app));
+  const datos = calidadPlanificacion(rows, semanas.map((s) => s.inicio), configIndice(app), app.altas);
   const UMBRAL_SIM = umbralSimilares(app);
   if (!datos.length) { cont.innerHTML = '<p class="vacio">Sin datos para el período.</p>'; return; }
   const alerta = (v, umbral, mayor = true) => v !== null && (mayor ? v > umbral : v < umbral);
@@ -119,12 +119,12 @@ async function calidad(cont, app) {
   const barra = (pctV, al) => `<span class="cal-barra" aria-hidden="true"><span class="${al ? 'cal-baja' : ''}" style="width:${Math.min(100, Math.max(0, pctV || 0)).toFixed(0)}%"></span></span>`;
   const conAlta = datos.filter((d) => alerta(d.pctAlta, UMBRAL_ALTA)).length;
   cont.innerHTML = `<p class="nota nota-cab">${n} ${n === 1 ? 'semana' : 'semanas'} hasta la semana seleccionada. ${conAlta ? `${conAlta} ${conAlta === 1 ? 'persona marca' : 'personas marcan'} más del ${num(UMBRAL_ALTA, 0)}% de sus tareas como Alta: así la importancia deja de servir para priorizar.` : ''}</p><div data-cal-tabla></div>
-    <p class="nota">Ocupación acumulada: horas planificadas del período sobre la jornada de las semanas planificadas. Se marca para revisar: ocupación menor al ${UMBRAL_OCUPACION}% (planificación incompleta), más del ${num(UMBRAL_ALTA, 0)}% de tareas en Alta o más del ${UMBRAL_SIN_HORAS}% sin horas. Evaluadas: con Estado o cumplimiento cargado. % Tareas similares: de cada 100 líneas, cuántas son la misma tarea de esa semana cargada con distinto cliente, CC, mes u obra (se marca a partir del ${num(UMBRAL_SIM, 0)}%; el detalle está en Tareas repetitivas).</p>`;
+    <p class="nota">Semanas planificadas: sobre las semanas del período desde el alta de cada persona. Ocupación acumulada: horas planificadas del período sobre la jornada de las semanas planificadas. Se marca para revisar: ocupación menor al ${UMBRAL_OCUPACION}% (planificación incompleta), más del ${num(UMBRAL_ALTA, 0)}% de tareas en Alta o más del ${UMBRAL_SIN_HORAS}% sin horas. Evaluadas: con Estado o cumplimiento cargado. % Tareas similares: de cada 100 líneas, cuántas son la misma tarea de esa semana cargada con distinto cliente, CC, mes u obra (se marca a partir del ${num(UMBRAL_SIM, 0)}%; el detalle está en Tareas repetitivas).</p>`;
   tabla(cont.querySelector('[data-cal-tabla]'), {
     rows: datos, orden: { key: 'ocupacion', dir: -1 },
     cols: [
       { key: 'persona', label: 'Persona', render: (d) => `<a class="nom" href="#/planificacion?persona=${encodeURIComponent(d.persona)}">${esc(d.persona)}</a><span class="tenue bloque">${esc(d.area)}</span>` },
-      { key: 'semanas', label: 'Semanas planificadas', alinear: 'num', render: (d) => `<span class="cal-celda">${barra((d.semanas / n) * 100, d.semanas / n < 0.5)}<span>${d.semanas} de ${n}</span></span>` },
+      { key: 'semanas', label: 'Semanas planificadas', alinear: 'num', render: (d) => `<span class="cal-celda">${barra(d.totalSemanas ? (d.semanas / d.totalSemanas) * 100 : 0, d.totalSemanas ? d.semanas / d.totalSemanas < 0.5 : false)}<span>${d.semanas} de ${d.totalSemanas}</span></span>` },
       { key: 'ocupacion', label: 'Ocupación acumulada', alinear: 'num', render: (d) => `<span class="cal-celda">${barra(d.ocupacion, alerta(d.ocupacion, UMBRAL_OCUPACION, false))}<span>${porc(d.ocupacion)}</span></span>` },
       { key: 'pctAlta', label: 'Tareas en Alta', alinear: 'num', render: (d) => chip(porc(d.pctAlta), alerta(d.pctAlta, UMBRAL_ALTA)) },
       { key: 'pctSinHoras', label: 'Sin horas', alinear: 'num', render: (d) => chip(porc(d.pctSinHoras), alerta(d.pctSinHoras, UMBRAL_SIN_HORAS)) },
@@ -170,15 +170,16 @@ async function cuadroCargaSemanal(cont, app) {
   const semanas = [...app.semanas].reverse().map((s) => s.inicio).filter((s) => s <= hasta);
   let datos;
   // app.personaSemana ya está en memoria (se recarga después de cada carga de Excel); el área es la del Excel
-  try { datos = cumplimientoCarga(app.personaSemana.filter((r) => app.pasa(r)), semanas); }  // respeta los filtros globales
+  try { datos = cumplimientoCarga(app.personaSemana.filter((r) => app.pasa(r)), semanas, app.altas); }  // respeta los filtros globales
   catch (e) { cont.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   if (!datos.personas.length) { cont.innerHTML = '<p class="vacio">Sin datos.</p>'; return; }
   const OK = '<svg class="ico-ok" viewBox="0 0 20 20" aria-label="Con planificación" role="img"><path d="M4 10.5l4 4 8-9"/></svg>';
+  const NA = '<span class="cc-na" title="Antes del alta: no corresponde" aria-label="Antes del alta">·</span>';
   const NO = '<svg class="ico-no" viewBox="0 0 20 20" aria-label="Sin planificación" role="img"><path d="M5 5l10 10M15 5L5 15"/></svg>';
   if (ORDEN_CC.col.startsWith('s') && +ORDEN_CC.col.slice(1) >= datos.semanas.length) { ORDEN_CC.col = 'persona'; ORDEN_CC.dir = 1; }
 
   // valor de orden de cada columna; empates: por nombre
-  const valor = (p, col) => (col === 'persona' ? p.persona : col === 'pct' ? p.pct : (p.marcas[+col.slice(1)] ? 1 : 0));
+  const valor = (p, col) => (col === 'persona' ? p.persona : col === 'pct' ? p.pct : (p.marcas[+col.slice(1)] === null ? -1 : p.marcas[+col.slice(1)] ? 1 : 0));
   const ordenar = () => [...datos.personas].sort((a, b) => {
     const va = valor(a, ORDEN_CC.col), vb = valor(b, ORDEN_CC.col);
     const c = typeof va === 'string' ? va.localeCompare(vb, 'es') : va - vb;
@@ -198,11 +199,11 @@ async function cuadroCargaSemanal(cont, app) {
       </tr></thead>
       <tbody>${filas.map((p) => `<tr>
         <th scope="row" class="cc-persona"><a href="#/planificacion?persona=${encodeURIComponent(p.persona)}">${esc(p.persona)}</a><span>${esc(p.area)}</span></th>
-        ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m ? OK : NO}</td>`).join('')}
-        <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
+        ${p.marcas.map((m, i) => `<td class="${datos.semanas[i].inicio === hasta ? 'cc-actual' : ''}">${m === null ? NA : m ? OK : NO}</td>`).join('')}
+        <td class="cc-pct"><span class="sem-pill s-${p.nivel}" title="${p.conPlan} de ${p.total} semanas${p.inicio ? ` (desde la semana ${p.inicio + 1}, su alta)` : ''}">${porc(p.pct)}</span><span class="cc-frac">${p.conPlan}/${p.total}</span></td>
       </tr>`).join('')}</tbody>
     </table></div>
-    <p class="nota">${filas.length > FILAS_VISIBLES ? `Se ven ${FILAS_VISIBLES} de ${filas.length} personas: desplazá la tabla para ver el resto. ` : ''}Tocá el encabezado de una columna para ordenar; otro toque invierte el orden. La semana 1 es la primera semana registrada (${fechaCorta(datos.semanas[0].inicio)}). El cumplimiento es la cantidad de semanas con planificación sobre el total de semanas${semanas.length < app.semanas.length ? ', hasta la semana seleccionada' : ''}.</p>`;
+    <p class="nota">${filas.length > FILAS_VISIBLES ? `Se ven ${FILAS_VISIBLES} de ${filas.length} personas: desplazá la tabla para ver el resto. ` : ''}Tocá el encabezado de una columna para ordenar; otro toque invierte el orden. La semana 1 es la primera semana registrada (${fechaCorta(datos.semanas[0].inicio)}). El cumplimiento es la cantidad de semanas con planificación sobre las semanas que le corresponden a cada persona: desde su fecha de alta${semanas.length < app.semanas.length ? ' hasta la semana seleccionada' : ''}. Las semanas anteriores al alta se ven con · y no cuentan.</p>`;
 
     // alto visible: encabezado + 10 filas
     const scroll = cont.querySelector('.cc-scroll');
