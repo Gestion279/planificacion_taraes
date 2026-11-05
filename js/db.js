@@ -134,10 +134,14 @@ export async function excepcionesAuditoria() {
   return data;
 }
 
+// fecha_alta: desde qué semana se le exige planificación (migración 011). Si la base todavía
+// no tiene la columna, se lee sin ella y el cumplimiento se mide desde la semana 1, como antes.
 export async function personas() {
-  const { data, error } = await sb.from('personas').select('id,nombre,jornada_horas,areas(nombre)').order('nombre');
+  let { data, error } = await sb.from('personas').select('id,nombre,jornada_horas,fecha_alta,areas(nombre)').order('nombre');
+  if (error && /fecha_alta|42703/i.test(`${error.code || ''} ${error.message || ''}`))
+    ({ data, error } = await sb.from('personas').select('id,nombre,jornada_horas,areas(nombre)').order('nombre'));
   if (error) throw new Error(error.message);
-  return data.map((p) => ({ id: p.id, nombre: p.nombre, jornada: Number(p.jornada_horas), area: p.areas?.nombre || '' }));
+  return data.map((p) => ({ id: p.id, nombre: p.nombre, jornada: Number(p.jornada_horas), area: p.areas?.nombre || '', alta: p.fecha_alta || null }));
 }
 
 export async function cambios(semanaIds) {

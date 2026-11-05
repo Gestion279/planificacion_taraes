@@ -61,6 +61,10 @@ export const app = {
     const area = this.personas.find((p) => p.nombre === nombre)?.area;
     return new Set(area ? [area] : []);
   },
+  // personaId → fecha de alta: el cumplimiento de carga se mide desde esa semana
+  get altas() {
+    return new Map(this.personas.filter((p) => p.alta).map((p) => [p.id, p.alta]));
+  },
   personaEnAreas(nombre, areas) {
     if (!areas.length) return true;
     const propias = this.areasDePersona(nombre);

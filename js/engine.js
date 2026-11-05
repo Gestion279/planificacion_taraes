@@ -895,22 +895,39 @@ export function nivelSemaforo(p) {
   return 'verde';
 }
 
-export function cumplimientoCarga(registros, semanas) {
+// Semana desde la que se le exige planificación a una persona (índice dentro de semanas, en orden).
+// Es la semana de su fecha de alta; si planificó antes del alta, desde esa primera planificación,
+// para no perder semanas cargadas. Sin fecha de alta: desde la semana 1 (como siempre).
+//   semanas: ['YYYY-MM-DD', ...] ascendente · alta: 'YYYY-MM-DD' o null · primeraConPlan: índice o -1
+export function inicioPersona(semanas, alta, primeraConPlan = -1) {
+  if (!alta) return 0;
+  const lunes = lunesDe(alta);
+  let i = semanas.findIndex((s) => s >= lunes);
+  if (i < 0) i = semanas.length;                       // el alta es posterior a la última semana
+  return primeraConPlan >= 0 ? Math.min(i, primeraConPlan) : i;
+}
+
+// altas: Map personaId → fecha de alta ('YYYY-MM-DD'). Las semanas anteriores al alta quedan en null
+// (no corresponden) y no cuentan en el total: el cumplimiento se mide desde el alta.
+export function cumplimientoCarga(registros, semanas, altas = new Map()) {
   const idx = new Map(semanas.map((s, i) => [s, i]));
   const porPersona = new Map();
   for (const r of registros) {
     if (!idx.has(r.semana)) continue;
-    if (!porPersona.has(r.persona)) porPersona.set(r.persona, { persona: r.persona, areas: new Set(), marcas: semanas.map(() => false) });
+    if (!porPersona.has(r.persona)) porPersona.set(r.persona, { persona: r.persona, personaId: r.personaId ?? null, areas: new Set(), marcas: semanas.map(() => false) });
     const p = porPersona.get(r.persona);
     p.marcas[idx.get(r.semana)] = true;
     if (r.area) p.areas.add(r.area);
   }
-  const total = semanas.length;
   const personas = [...porPersona.values()].map(({ areas, ...p }) => {
     p.area = [...areas].sort((a, b) => a.localeCompare(b, 'es')).join(', ');
+    const alta = altas.get(p.personaId) || null;
+    const inicio = inicioPersona(semanas, alta, p.marcas.indexOf(true));
+    p.marcas = p.marcas.map((m, i) => (i < inicio ? null : m));
+    const total = semanas.length - inicio;
     const conPlan = p.marcas.filter(Boolean).length;
     const pct = total ? (conPlan / total) * 100 : null;
-    return { ...p, conPlan, total, pct, nivel: nivelSemaforo(pct) };
+    return { ...p, alta, inicio, conPlan, total, pct, nivel: nivelSemaforo(pct) };
   }).sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
   return { semanas: semanas.map((inicio, i) => ({ numero: i + 1, inicio })), personas };
 }
@@ -1161,15 +1178,21 @@ export function formulaIndice(config = INDICE_DEFECTO) {
   };
 }
 
-export function calidadPlanificacion(rows, nSemanas, config = INDICE_DEFECTO) {
+// periodo: lista de semanas del período ('YYYY-MM-DD', ascendente) o, como antes, solo su cantidad.
+// Con la lista y altas (Map personaId → fecha de alta), las semanas anteriores al alta no cuentan.
+export function calidadPlanificacion(rows, periodo, config = INDICE_DEFECTO, altas = new Map()) {
   const similares = tareasSimilaresPorPersona(rows);
+  const lista = Array.isArray(periodo) ? [...periodo].sort() : null;
+  const nSemanas = lista ? lista.length : periodo;
   return [...groupBy(rows, (r) => r.persona)].map(([persona, rs]) => {
-    const semanas = new Set(rs.map((r) => r.semana)).size;
+    const conPlan = new Set(rs.map((r) => r.semana));
+    const semanas = conPlan.size;
+    const totalSemanas = lista ? nSemanas - inicioPersona(lista, altas.get(rs[0].personaId), lista.findIndex((s) => conPlan.has(s))) : nSemanas;
     const jornada = Math.max(...rs.map((r) => r.jornada || 0)) || CONFIG.jornada;
     const horas = sum(rs, (r) => r.horas);
     const n = rs.length;
     return {
-      persona, area: areasDe(rs).join(', '), semanas, totalSemanas: nSemanas, horas,
+      persona, area: areasDe(rs).join(', '), semanas, totalSemanas, horas,
       ocupacion: semanas ? (horas / (semanas * jornada)) * 100 : null,
       pctAlta: n ? (rs.filter((r) => prioridadDe(r) === 'Alta').length / n) * 100 : null,
       pctSinHoras: n ? (rs.filter((r) => !r.horas).length / n) * 100 : null,
