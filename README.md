@@ -90,6 +90,8 @@ Las comparaciones entre personas usan **dedicación** (horas por semana), no el 
 
 **Personas con el nombre mal escrito.** Si una carga trae una persona nueva con un nombre parecido a una existente, la vista previa lo avisa. Si ya se guardó, en *Carga → Unificar personas* se juntan las dos; el nombre mal escrito queda como alias y las próximas cargas se corrigen solas.
 
+**Fecha de alta.** El cumplimiento de *Planificación cargada por semana* y las *Semanas planificadas* del Índice de calidad se miden desde la semana del alta de cada persona (columna `fecha_alta` de `personas`). Las altas nuevas la completan solas con el lunes siguiente; se puede corregir desde el Table Editor de Supabase. Vacía: se mide desde la semana 1. Las semanas anteriores al alta se ven con · en el cuadro y no cuentan.
+
 **Cobertura de carga.** El Resumen indica cuántas de las personas habituales (las que planificaron en alguna de las 4 semanas anteriores) cargaron su planificación, y quiénes faltan.
 
 **Semanas de junio.** Están en el Histórico anterior y todavía no se migraron. En *Carga → Migrar el historial*, al elegir los dos HTML quedan marcadas solo las semanas que todavía no existen en la base, para no pisar lo cargado desde los Excel.
