@@ -109,3 +109,14 @@ body.modulo-desempeno .semana-ctrl,body.modulo-desempeno .filtros-barra{visibili
 .des-raiz .nota{margin:0}
 .des-raiz.cajon{position:fixed;inset:0 0 0 auto;z-index:auto}
 @media (max-width:760px){.des-raiz .kpi{border:1px solid var(--linea)}}
+/* Vista general: tabla por persona y feedback agrupado */
+.des-raiz .fb-grupo{display:flex;flex-direction:column;gap:6px}
+.des-raiz .fb-para{font-size:13px;color:var(--tenue)}
+.des-raiz .des-tabla-scroll{overflow-x:auto}
+.des-raiz .des-tabla{width:100%;border-collapse:collapse;font-size:14px}
+.des-raiz .des-tabla th{text-align:left;font-size:12px;font-weight:600;color:var(--tenue);padding:8px 10px;border-bottom:1px solid var(--linea);white-space:nowrap}
+.des-raiz .des-tabla td{padding:9px 10px;border-bottom:1px solid var(--linea);vertical-align:middle}
+.des-raiz .des-tabla .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.des-raiz .des-tabla tr.sin-plan td{color:var(--tenue)}
+.des-raiz .des-tabla tbody tr:hover{background:#FCFAF6}
+.des-raiz .pct{display:inline-block;min-width:48px;padding:2px 8px;border-radius:999px;font-size:13px;font-weight:700;text-align:center}
