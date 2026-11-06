@@ -1,0 +1,77 @@
+/* Desempeño · estilos compartidos (Carga semanal "Mi desempeño" e informe "Desempeño").
+   Usan las variables de color de la app (--tinta, --linea, --cobre, etc.). */
+/* ---- Mi desempeño / Desempeño ---- */
+.des-enc{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+.des-enc h1{font-size:24px}
+.des-enc .sub{font-size:14px;color:var(--tenue);margin-top:6px}
+.des-enc .campo{min-width:220px}
+
+.fb-lista{display:flex;flex-direction:column;gap:12px}
+.fb{background:var(--superficie);border:1px solid var(--linea);border-left:4px solid var(--cobre);border-radius:var(--radio);padding:18px 22px;display:flex;flex-direction:column;gap:10px}
+.fb-cab{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.fb-de{font-size:17px;font-weight:700}
+.fb-rol{font-size:13px;color:var(--tenue)}
+.fb-fecha{margin-left:auto;font-size:13px;color:var(--tenue)}
+.fb-texto{font-size:15px;max-width:76ch}
+.fb-partes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px;padding-top:10px;border-top:1px solid var(--linea)}
+.fb-partes span{display:block;font-size:12px;font-weight:600;color:var(--tenue);margin-bottom:2px}
+.fb-partes p{font-size:14px}
+.fb-borrador{border-left-color:var(--control);background:#FCFAF6}
+.val-muybuena{background:var(--verde-fondo);color:var(--verde-tinta)}
+.val-buena{background:var(--gris-chip);color:var(--tinta)}
+.val-amejorar{background:var(--aviso-fondo);color:var(--aviso-tinta)}
+
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.kpi{padding:16px 18px;display:flex;flex-direction:column;gap:4px}
+.kpi .et{font-size:13px;font-weight:600;color:var(--tenue)}
+.kpi .valor{font-size:28px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi .det{font-size:13px;color:var(--tenue)}
+.medidor{height:6px;border-radius:3px;background:var(--gris-chip);margin-top:6px;overflow:hidden}
+.medidor i{display:block;height:100%;background:var(--barra);border-radius:3px}
+
+.des-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+.bloque{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.bloque h2{font-size:17px}
+.bloque .nota{font-size:13px;color:var(--tenue)}
+.tend svg{width:100%;height:auto;display:block}
+.fila-res{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--linea);font-size:15px}
+.fila-res strong{font-variant-numeric:tabular-nums;font-size:16px}
+.imp{display:grid;grid-template-columns:64px 1fr 48px;align-items:center;gap:12px;font-size:14px}
+.imp .pista{height:10px;border-radius:5px;background:var(--gris-chip);overflow:hidden}
+.imp .pista i{display:block;height:100%;border-radius:5px}
+.imp b{text-align:right;font-variant-numeric:tabular-nums}
+
+/* Informe: filtros + Dar Feedback */
+.sin-fb{padding:16px 20px;color:var(--tenue);font-size:14px;border:1px dashed var(--control);border-radius:var(--radio);background:var(--superficie)}
+.des-vacio{padding:40px 24px;text-align:center;color:var(--tenue)}
+.filtros{padding:16px 20px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) auto;gap:16px;align-items:end}
+.cajon{margin:0 0 0 auto;height:100%;max-height:100%;width:460px;max-width:100%;border:0;padding:0;background:var(--superficie);box-shadow:-8px 0 24px rgba(43,52,54,.18);color:var(--tinta)}
+.cajon[open]{display:flex;flex-direction:column}
+.cajon::backdrop{background:rgba(43,52,54,.35)}
+.cajon form{display:flex;flex-direction:column;height:100%}
+.cajon-cab{padding:20px 24px;border-bottom:1px solid var(--linea);display:flex;flex-direction:column;gap:6px}
+.cajon-cab h2{font-size:19px}
+.cajon-cab p{font-size:14px;color:var(--tenue)}
+.cajon-cuerpo{min-height:0;padding:20px 24px;display:flex;flex-direction:column;gap:18px;overflow:auto;flex:1}
+.firma{padding:12px 14px;background:var(--activo);border-radius:var(--radio-control);font-size:14px;color:var(--cobre-oscuro)}
+.firma strong{color:var(--tinta)}
+.segm{display:flex;gap:8px;flex-wrap:wrap}
+.segm button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:999px;border:1px solid var(--control);background:var(--superficie);color:var(--tinta)}
+.segm button[aria-pressed=true]{background:var(--barra);border-color:var(--barra);color:#fff;font-weight:600}
+textarea.in{padding:10px;min-height:96px;resize:vertical;line-height:1.45}
+.cajon-pie{padding:16px 24px;border-top:1px solid var(--linea);display:flex;justify-content:flex-end;gap:10px}
+
+@media (max-width:760px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .kpi .valor{font-size:24px}
+  .des-grid{grid-template-columns:1fr}
+  .fb-partes{grid-template-columns:1fr}
+  .fb-fecha{margin-left:0;width:100%}
+  .contenido{padding:20px 16px 48px}
+  .des-enc .campo{min-width:0;width:100%}
+  .barra{padding:8px 16px}
+}
+
+/* El gráfico de tendencia no se achica de más en el celular: se desplaza de costado */
+.tend{overflow-x:auto}
+@media (max-width:760px){.tend svg{min-width:480px}}
