@@ -101,3 +101,11 @@ body.modulo-desempeno .semana-ctrl,body.modulo-desempeno .filtros-barra{visibili
 .des-raiz .barra{padding:8px 16px}}
 .des-raiz .tend{overflow-x:auto}
 @media (max-width:760px){.des-raiz .tend svg{min-width:480px}}
+/* El informe ya usa .kpis, .kpi, .bloque, .filtros, .nota y .cajon en otras hojas:
+   dentro de Desempeño se anulan esas reglas para que se vea igual que en Carga semanal. */
+.des-raiz .kpis{background:none;border:0;border-radius:0;margin:0}
+.des-raiz .bloque{font-size:15px;margin-top:0}
+.des-raiz .filtros{margin:0;flex-wrap:nowrap}
+.des-raiz .nota{margin:0}
+.des-raiz.cajon{position:fixed;inset:0 0 0 auto;z-index:auto}
+@media (max-width:760px){.des-raiz .kpi{border:1px solid var(--linea)}}
