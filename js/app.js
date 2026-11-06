@@ -14,8 +14,9 @@ import * as repetitivas from './modules/repetitivas.js';
 import * as acciones from './modules/acciones.js';
 import * as comparar from './modules/comparar.js';
 import * as carga from './modules/carga.js';
+import * as desempeno from './modules/desempeno.js';
 
-const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, repetitivas, comparar, acciones, carga };
+const MODULOS = { resumen, planificacion, riesgos, mejoras, evolucion, repetitivas, comparar, acciones, desempeno, carga };
 // Ruta anterior: Personas se integró en Planificación (detalle del mapa de calor) y en Carga (jornada y horas reales).
 // Los enlaces guardados siguen funcionando.
 const RUTAS_ANTERIORES = { personas: 'planificacion' };
@@ -263,7 +264,9 @@ async function render(opc = {}) {
   document.title = `${mod.titulo} · Planificación de tareas`;
   limpiarGraficos();
   if (!mantenerScroll) window.scrollTo(0, 0);
-  document.body.classList.toggle('sin-filtros-globales', app.modulo === 'carga');
+  document.body.classList.toggle('sin-filtros-globales', app.modulo === 'carga' || app.modulo === 'desempeno');
+  // Desempeño tiene sus propios filtros (persona, área y semana): la semana y los filtros de la barra no aplican
+  document.body.classList.toggle('modulo-desempeno', app.modulo === 'desempeno');
   const main = $('#contenido');
   if (!app.semanas.length && app.modulo !== 'carga') {
     main.innerHTML = `<section class="vacio-inicial">
