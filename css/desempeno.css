@@ -1,0 +1,103 @@
+/* Hoja Desempeño del informe. Todo queda dentro de .des-raiz para no afectar las demás hojas.
+   Colores: misma paleta que Carga semanal. */
+.des-raiz{--tinta:#2B3436;--tenue:#5B6363;--barra:#4B5557;--superficie:#FFFFFF;--linea:#E4DDD0;--control:#CFC8BA;
+  --activo:#F0E3D1;--cobre:#C88B58;--cobre-tinta:#8F5A2B;--cobre-oscuro:#6E431F;--aviso-fondo:#F7EDD5;--aviso-tinta:#6E4F12;
+  --verde:#2E8540;--verde-fondo:#E8EEDD;--verde-tinta:#24693A;--rojo:#C62828;--naranja:#E67E22;--amarillo:#F2C230;
+  --gris-chip:#E9ECEC;--error:#A8322D;--radio:8px;--radio-control:6px;
+  color:var(--tinta);font-family:'Public Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.45}
+.des-raiz:not(dialog){display:flex;flex-direction:column;gap:20px}
+.des-raiz *,.des-raiz *::before,.des-raiz *::after{box-sizing:border-box}
+.des-raiz h1,.des-raiz h2,.des-raiz h3{margin:0;line-height:1.2}
+.des-raiz p{margin:0}
+.des-raiz [hidden]{display:none!important}
+.des-raiz .tarjeta{background:var(--superficie);border:1px solid var(--linea);border-radius:var(--radio)}
+.des-raiz .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;vertical-align:middle}
+.des-raiz .chip-curso{background:var(--gris-chip);color:var(--tinta)}
+.des-raiz .in{font:inherit;font-size:15px;color:var(--tinta);background:var(--superficie);border:1px solid var(--control);border-radius:var(--radio-control);padding:0 10px;min-height:44px;width:100%}
+.des-raiz select.in{padding-right:28px}
+.des-raiz .in:focus{outline:2px solid var(--barra);outline-offset:1px;border-color:var(--barra)}
+.des-raiz .in[aria-invalid="true"]{border-color:var(--error)}
+.des-raiz .campo{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--tenue);min-width:0}
+.des-raiz .campo.grande{font-size:13px;color:var(--tinta);gap:6px}
+.des-raiz .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:var(--radio-control);font:inherit;font-size:15px;font-weight:600;cursor:pointer;text-decoration:none;border:1px solid var(--control);background:var(--superficie);color:var(--tinta)}
+.des-raiz .btn:hover{background:#FBF8F3}
+.des-raiz .btn-p{background:var(--barra);border-color:var(--barra);color:#fff}
+.des-raiz .btn-p:hover{background:#3E4749}
+.des-raiz .btn[disabled]{opacity:.55;cursor:default}
+.des-raiz .error-texto{color:var(--error);font-size:14px}
+.des-raiz .nota{font-size:13px;color:var(--tenue)}
+.des-raiz .cargando{padding:40px 0;text-align:center;color:var(--tenue)}
+.des-raiz .des-ingreso{max-width:440px;margin:40px auto;padding:32px;display:flex;flex-direction:column;gap:18px}
+.des-raiz .des-ingreso h1{font-size:24px}
+.des-raiz .des-persona{font-size:20px;display:flex;align-items:center;gap:10px}
+.des-raiz .des-quien{font-size:14px;color:var(--tenue)}
+.des-raiz .des-link{all:unset;cursor:pointer;color:var(--cobre-tinta);text-decoration:underline;text-underline-offset:3px}
+.des-raiz .des-link:focus-visible{outline:2px solid var(--barra);outline-offset:2px}
+.des-raiz :focus-visible{outline:2px solid var(--barra);outline-offset:2px}
+/* En esta hoja no aplican la semana ni los filtros de la barra: tiene los suyos */
+body.modulo-desempeno .semana-ctrl,body.modulo-desempeno .filtros-barra{visibility:hidden}
+@media (max-width:760px){.des-raiz .filtros{grid-template-columns:1fr}}
+.des-raiz .des-enc{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+.des-raiz .des-enc h1{font-size:24px}
+.des-raiz .des-enc .sub{font-size:14px;color:var(--tenue);margin-top:6px}
+.des-raiz .des-enc .campo{min-width:220px}
+.des-raiz .fb-lista{display:flex;flex-direction:column;gap:12px}
+.des-raiz .fb{background:var(--superficie);border:1px solid var(--linea);border-left:4px solid var(--cobre);border-radius:var(--radio);padding:18px 22px;display:flex;flex-direction:column;gap:10px}
+.des-raiz .fb-cab{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.des-raiz .fb-de{font-size:17px;font-weight:700}
+.des-raiz .fb-rol{font-size:13px;color:var(--tenue)}
+.des-raiz .fb-fecha{margin-left:auto;font-size:13px;color:var(--tenue)}
+.des-raiz .fb-texto{font-size:15px;max-width:76ch}
+.des-raiz .fb-partes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px;padding-top:10px;border-top:1px solid var(--linea)}
+.des-raiz .fb-partes span{display:block;font-size:12px;font-weight:600;color:var(--tenue);margin-bottom:2px}
+.des-raiz .fb-partes p{font-size:14px}
+.des-raiz .fb-borrador{border-left-color:var(--control);background:#FCFAF6}
+.des-raiz .val-muybuena{background:var(--verde-fondo);color:var(--verde-tinta)}
+.des-raiz .val-buena{background:var(--gris-chip);color:var(--tinta)}
+.des-raiz .val-amejorar{background:var(--aviso-fondo);color:var(--aviso-tinta)}
+.des-raiz .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.des-raiz .kpi{padding:16px 18px;display:flex;flex-direction:column;gap:4px}
+.des-raiz .kpi .et{font-size:13px;font-weight:600;color:var(--tenue)}
+.des-raiz .kpi .valor{font-size:28px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.des-raiz .kpi .det{font-size:13px;color:var(--tenue)}
+.des-raiz .medidor{height:6px;border-radius:3px;background:var(--gris-chip);margin-top:6px;overflow:hidden}
+.des-raiz .medidor i{display:block;height:100%;background:var(--barra);border-radius:3px}
+.des-raiz .des-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+.des-raiz .bloque{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.des-raiz .bloque h2{font-size:17px}
+.des-raiz .bloque .nota{font-size:13px;color:var(--tenue)}
+.des-raiz .tend svg{width:100%;height:auto;display:block}
+.des-raiz .fila-res{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--linea);font-size:15px}
+.des-raiz .fila-res strong{font-variant-numeric:tabular-nums;font-size:16px}
+.des-raiz .imp{display:grid;grid-template-columns:64px 1fr 48px;align-items:center;gap:12px;font-size:14px}
+.des-raiz .imp .pista{height:10px;border-radius:5px;background:var(--gris-chip);overflow:hidden}
+.des-raiz .imp .pista i{display:block;height:100%;border-radius:5px}
+.des-raiz .imp b{text-align:right;font-variant-numeric:tabular-nums}
+.des-raiz .sin-fb{padding:16px 20px;color:var(--tenue);font-size:14px;border:1px dashed var(--control);border-radius:var(--radio);background:var(--superficie)}
+.des-raiz .des-vacio{padding:40px 24px;text-align:center;color:var(--tenue)}
+.des-raiz .filtros{padding:16px 20px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) auto;gap:16px;align-items:end}
+.des-raiz.cajon{margin:0 0 0 auto;height:100%;max-height:100%;width:460px;max-width:100%;border:0;padding:0;background:var(--superficie);box-shadow:-8px 0 24px rgba(43,52,54,.18);color:var(--tinta)}
+.des-raiz.cajon[open]{display:flex;flex-direction:column}
+.des-raiz.cajon::backdrop{background:rgba(43,52,54,.35)}
+.des-raiz.cajon form{display:flex;flex-direction:column;height:100%}
+.des-raiz .cajon-cab{padding:20px 24px;border-bottom:1px solid var(--linea);display:flex;flex-direction:column;gap:6px}
+.des-raiz .cajon-cab h2{font-size:19px}
+.des-raiz .cajon-cab p{font-size:14px;color:var(--tenue)}
+.des-raiz .cajon-cuerpo{min-height:0;padding:20px 24px;display:flex;flex-direction:column;gap:18px;overflow:auto;flex:1}
+.des-raiz .firma{padding:12px 14px;background:var(--activo);border-radius:var(--radio-control);font-size:14px;color:var(--cobre-oscuro)}
+.des-raiz .firma strong{color:var(--tinta)}
+.des-raiz .segm{display:flex;gap:8px;flex-wrap:wrap}
+.des-raiz .segm button{font:inherit;font-size:14px;min-height:40px;padding:0 16px;border-radius:999px;border:1px solid var(--control);background:var(--superficie);color:var(--tinta)}
+.des-raiz .segm button[aria-pressed=true]{background:var(--barra);border-color:var(--barra);color:#fff;font-weight:600}
+.des-raiz textarea.in{padding:10px;min-height:96px;resize:vertical;line-height:1.45}
+.des-raiz .cajon-pie{padding:16px 24px;border-top:1px solid var(--linea);display:flex;justify-content:flex-end;gap:10px}
+@media (max-width:760px){.des-raiz .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.des-raiz .kpi .valor{font-size:24px}
+.des-raiz .des-grid{grid-template-columns:1fr}
+.des-raiz .fb-partes{grid-template-columns:1fr}
+.des-raiz .fb-fecha{margin-left:0;width:100%}
+.des-raiz .contenido{padding:20px 16px 48px}
+.des-raiz .des-enc .campo{min-width:0;width:100%}
+.des-raiz .barra{padding:8px 16px}}
+.des-raiz .tend{overflow-x:auto}
+@media (max-width:760px){.des-raiz .tend svg{min-width:480px}}
